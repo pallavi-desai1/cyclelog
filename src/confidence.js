@@ -1,0 +1,38 @@
+// The prediction is "within +/- 2 days", continuity-corrected to 2.5 so the
+// window covers whole days either side of the predicted date.
+export const WINDOW_DAYS = 2.5;
+
+// Discount factor n/(n+k): with k = 3, three effective cycles buy half credit.
+export const SUFFICIENCY_K = 3;
+
+// Abramowitz & Stegun 7.1.26. JavaScript has no built-in erf; this
+// approximation is accurate to about 1.5e-7, far beyond what a percentage
+// rounded to a whole number needs.
+export function erf(x) {
+  if (x === 0) return 0;
+  if (!Number.isFinite(x)) return x > 0 ? 1 : -1;
+  const sign = x < 0 ? -1 : 1;
+  const z = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * z);
+  const poly = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t
+    - 0.284496736) * t + 0.254829592) * t;
+  return sign * (1 - poly * Math.exp(-z * z));
+}
+
+export function confidencePercent(sigma, nEff, windowDays = WINDOW_DAYS, k = SUFFICIENCY_K) {
+  if (!Number.isFinite(nEff) || nEff <= 0) return null;
+
+  const sufficiency = nEff / (nEff + k);
+
+  // A zero or unknown spread means the model sees no variation at all, so the
+  // probability of landing inside the window is 1. Dividing by it would give
+  // Infinity, and erf(Infinity) is 1 anyway — short-circuit rather than rely on
+  // that. A non-finite spread is treated as no information: probability 0.
+  let p;
+  if (sigma === null || sigma === undefined || sigma === 0) p = 1;
+  else if (!Number.isFinite(sigma)) p = 0;
+  else p = erf(windowDays / (Math.abs(sigma) * Math.SQRT2));
+
+  const percent = Math.round(100 * p * sufficiency);
+  return Math.min(100, Math.max(0, percent));
+}
