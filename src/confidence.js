@@ -9,6 +9,9 @@ export const SUFFICIENCY_K = 3;
 // approximation is accurate to about 1.5e-7, far beyond what a percentage
 // rounded to a whole number needs.
 export function erf(x) {
+  // erf(0) = 0 is an exact identity, but the approximation below returns about
+  // 1e-9 there — small enough to be harmless and large enough to look like a
+  // bug to anyone who prints it. Short-circuit so the identity holds exactly.
   if (x === 0) return 0;
   if (!Number.isFinite(x)) return x > 0 ? 1 : -1;
   const sign = x < 0 ? -1 : 1;

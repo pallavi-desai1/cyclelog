@@ -4,8 +4,20 @@ import { erf, confidencePercent, WINDOW_DAYS, SUFFICIENCY_K } from '../src/confi
 describe('erf', () => {
   // Reference values from standard tables; Abramowitz & Stegun 7.1.26 is
   // accurate to about 1.5e-7, so 6 decimal places is a fair bar.
-  it('is zero at zero', () => {
-    expect(erf(0)).toBeCloseTo(0, 10);
+  it('is exactly zero at zero', () => {
+    // Exact, not approximate: the implementation short-circuits this identity.
+    // The series itself returns ~1e-9 here, which would fail at 10 places.
+    expect(erf(0)).toBe(0);
+  });
+
+  // Documents the approximation's real accuracy so the exact assertion above is
+  // not mistaken for a guarantee that holds everywhere. Measured error at these
+  // three points is about 1.3e-7, consistent with A&S 7.1.26's stated bound.
+  it('is accurate to within 1.5e-7 of the true error function', () => {
+    const reference = [[0.5, 0.5204998778], [1, 0.8427007929], [2, 0.9953222650]];
+    for (const [x, truth] of reference) {
+      expect(Math.abs(erf(x) - truth)).toBeLessThan(1.5e-7);
+    }
   });
 
   it('matches the table at 0.5', () => {
