@@ -101,8 +101,14 @@ describe('baselineCycles', () => {
     const d = doc({
       birthControl: [episode('pill', '2015-06-01', '2015-12-31', 'regulate'), episode('implant', '2016-06-01')],
     });
-    // The 2015-02-01 cycle predates the pill; the others do not.
-    expect(baselineCycles(cycles, d).map(c => c.start)).toEqual(['2015-01-01', '2015-02-01']);
+    // 2016-01-01 is what makes this test discriminate. It falls after the pill
+    // ended and before the implant began, so filtering on the FIRST episode
+    // excludes it while filtering on the CURRENT episode would wrongly include
+    // it. Without this cycle both rules return the same two cycles — every
+    // other fixture here postdates both episode starts — and the test would
+    // pass against an implementation that uses the wrong episode entirely.
+    const spanningGap = [...cycles, cycle('2016-01-01', 29)];
+    expect(baselineCycles(spanningGap, d).map(c => c.start)).toEqual(['2015-01-01', '2015-02-01']);
   });
 
   it('excludes gap-flagged cycles even when they predate the episode', () => {
