@@ -19,10 +19,6 @@ export function cycleWeight(cycle, referenceISO, halfLifeDays = HALF_LIFE_DAYS) 
   return recency * precision;
 }
 
-export function effectiveN(weights) {
-  return weights.reduce((total, w) => total + (Number.isFinite(w) && w > 0 ? w : 0), 0);
-}
-
 function pairs(values, weights) {
   const out = [];
   for (let i = 0; i < values.length; i += 1) {
@@ -31,6 +27,14 @@ function pairs(values, weights) {
     if (Number.isFinite(v) && Number.isFinite(w) && w > 0) out.push({ v, w });
   }
   return out;
+}
+
+// Takes values as well as weights, and filters through the same `pairs()` the
+// statistics use. Summing weights alone would count an observation whose value
+// is non-finite — so nEff would claim a larger sample than the median or SD it
+// is reported beside, and the confidence percentage would be overstated.
+export function effectiveN(values, weights) {
+  return pairs(values, weights).reduce((total, x) => total + x.w, 0);
 }
 
 export function weightedMean(values, weights) {
@@ -54,6 +58,10 @@ export function weightedMedian(values, weights) {
     // next, mirroring how an even-sized unweighted median behaves.
     if (cumulative === half) {
       const next = p[i + 1];
+      // Unreachable in practice: cumulative only equals half at the final index
+      // when the total is zero, which the guard above already rejects. Kept as a
+      // defensive fallback because an undefined index here would return NaN, and
+      // nothing in this project may return NaN.
       return next ? (p[i].v + next.v) / 2 : p[i].v;
     }
   }

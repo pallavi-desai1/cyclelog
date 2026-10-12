@@ -44,8 +44,15 @@ describe('cycleWeight', () => {
     expect(cycleWeight(cycle('2016-01-01', 28), '2016-01-01')).toBe(1);
   });
 
+  // Asserts the literal 0.5, not APPROX_WEIGHT. Comparing against the module's
+  // own exported constant would pass for any value of that constant, so it
+  // could not catch a mis-wired multiply.
   it('halves the weight of an approximate cycle', () => {
-    expect(cycleWeight(cycle('2016-01-01', 28, 'approx'), '2016-01-01')).toBe(APPROX_WEIGHT);
+    expect(cycleWeight(cycle('2016-01-01', 28, 'approx'), '2016-01-01')).toBe(0.5);
+  });
+
+  it('pins the approximate-date weight itself', () => {
+    expect(APPROX_WEIGHT).toBe(0.5);
   });
 
   it('exposes the half-life it uses', () => {
@@ -54,12 +61,22 @@ describe('cycleWeight', () => {
 });
 
 describe('effectiveN', () => {
-  it('sums the weights', () => {
-    expect(effectiveN([1, 1, 0.5])).toBeCloseTo(2.5, 10);
+  it('sums the weights of usable observations', () => {
+    expect(effectiveN([28, 29, 30], [1, 1, 0.5])).toBeCloseTo(2.5, 10);
   });
 
-  it('is zero for no weights', () => {
-    expect(effectiveN([])).toBe(0);
+  it('is zero for an empty sample', () => {
+    expect(effectiveN([], [])).toBe(0);
+  });
+
+  // nEff must describe the same sample as the statistic it is printed beside:
+  // an observation the median and SD drop must not be counted here either.
+  it('ignores the weight of a non-finite value', () => {
+    expect(effectiveN([28, NaN, 30], [1, 1, 1])).toBe(2);
+  });
+
+  it('ignores negative weights', () => {
+    expect(effectiveN([28, 29], [1, -5])).toBe(1);
   });
 });
 
@@ -74,6 +91,12 @@ describe('weightedMean', () => {
 
   it('returns null when the weights sum to zero', () => {
     expect(weightedMean([27, 28], [0, 0])).toBeNull();
+  });
+
+  // A zero weight is a no-op whether or not it is filtered, so only a negative
+  // weight can tell `w > 0` apart from `w >= 0`.
+  it('ignores a negative weight rather than subtracting it', () => {
+    expect(weightedMean([20, 30], [-1, 1])).toBe(30);
   });
 
   it('returns null for an empty sample', () => {
@@ -140,10 +163,19 @@ describe('weightedSd', () => {
     expect(weightedSd([28], [1])).toBeNull();
   });
 
-  // Review Focus 3 again: the denominator V1 - V2/V1 vanishes when one weight
-  // dominates completely, which must be null rather than Infinity.
-  it('returns null when one weight carries all the mass', () => {
+  // Not the denominator guard: pairs() strips the zero-weighted points first,
+  // so this lands on the "fewer than two observations" branch. Labelled
+  // accurately so nobody reads it as covering something it does not.
+  it('returns null when only one observation carries any weight', () => {
     expect(weightedSd([27, 28, 30], [1, 0, 0])).toBeNull();
+  });
+
+  // Review Focus 3: the denominator V1 - V2/V1 is strictly positive for any two
+  // finite positive weights, so the only way to reach the guard is float
+  // cancellation at extreme magnitudes — where it must yield null, not
+  // -Infinity leaking into a confidence percentage.
+  it('returns null when extreme weight magnitudes cancel the denominator', () => {
+    expect(weightedSd([27, 28], [1e300, 1])).toBeNull();
   });
 
   it('returns null when all weights are zero', () => {
