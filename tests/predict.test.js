@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   TAU, lastPeriodStart, projectForward, baselineModel, adaptedModel, predict,
 } from '../src/predict.js';
+import { describeLengths } from '../src/stats.js';
 
 const span = (start, end) => ({ start, end, precision: 'exact', endPrecision: 'exact', source: 'clue' });
 const cycle = (start, length, extra = {}) => ({
@@ -160,6 +161,16 @@ describe('adaptedModel', () => {
   const baseDoc = doc({
     spans: [span('2015-01-01', '2015-01-04')],
     birthControl: [episode('implant', '2016-01-01', null, 'suppress')],
+  });
+
+  // Pins the dependency the n_P = 0 branch rests on. If describeLengths ever
+  // returns NaN for an empty sample instead of null, predict's short-circuit
+  // stops being merely defensive and this test says so loudly.
+  it('depends on describeLengths returning null, not NaN, for an empty sample', () => {
+    const empty = describeLengths([]);
+    expect(empty.mean).toBeNull();
+    expect(Number.isNaN(empty.mean)).toBe(false);
+    expect(0 * empty.mean).toBe(0);
   });
 
   // Review Focus 4: n_P = 0 is the normal state in a new episode, and the

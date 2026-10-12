@@ -119,8 +119,14 @@ export function adaptedModel(cycles, doc, todayISO) {
   let nEff;
 
   if (nP === 0) {
-    // w is 0 here, so the episode term contributes nothing. Short-circuit
-    // rather than computing 0 * mean-of-nothing, which would be 0 * NaN = NaN.
+    // w is 0 here, so the episode term contributes nothing either way: today
+    // `describeLengths([]).mean` is `null` and `0 * null === 0` by coercion, so
+    // the else branch below would also yield the baseline length. This branch is
+    // therefore defence in depth, not load-bearing -- kept because relying on
+    // `0 * null === 0` is relying on a coercion quirk, and because the guard
+    // keeps this correct if `describeLengths` ever returns NaN for an empty
+    // sample instead. The test below pins that dependency contract so such a
+    // change surfaces here rather than silently making this branch essential.
     length = base.length;
     sigmaBlend = base.sigma;
     nEff = base.nEff;
