@@ -1,0 +1,14 @@
+*legacy*periods*.txt
+.DS_Store
+.superpowers/
+ClueDataDownload*
+cyclelog-*.csv
+cyclelog-*.json
+docs/
+expectations.json
+history-backup*/
+measurements.json
+node_modules/
+private/
+seed*.json
+seed.json
