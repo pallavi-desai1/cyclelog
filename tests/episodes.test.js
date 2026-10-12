@@ -151,6 +151,22 @@ describe('episodeCycles', () => {
     expect(episodeCycles(cycles, d, '2016-10-01').map(c => c.start)).toEqual(['2016-07-01', '2016-08-15']);
   });
 
+  // The upper boundary needs a CLOSED episode to be testable at all. Without
+  // this, every fixture uses the open-ended implant and a mutant filtering
+  // `cycle.start < end` instead of `<= end` passes the whole suite. Today the
+  // owner has one open episode — but the episode model exists to survive a
+  // method change, which is precisely when closed windows appear.
+  it('includes a cycle starting exactly on the episode end date', () => {
+    const d = doc({ birthControl: [episode('pill', '2015-01-01', '2016-07-01', 'regulate')] });
+    expect(episodeCycles(cycles, d, '2016-07-01').map(c => c.start))
+      .toEqual(['2015-01-01', '2016-07-01']);
+  });
+
+  it('excludes a cycle starting the day after the episode ended', () => {
+    const d = doc({ birthControl: [episode('pill', '2015-01-01', '2016-06-30', 'regulate')] });
+    expect(episodeCycles(cycles, d, '2016-06-30').map(c => c.start)).toEqual(['2015-01-01']);
+  });
+
   it('counts only the current episode, not an earlier one', () => {
     const d = doc({
       birthControl: [episode('pill', '2015-01-01', '2015-06-30', 'regulate'), episode('implant', '2016-06-01')],
