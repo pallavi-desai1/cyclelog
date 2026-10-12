@@ -16,9 +16,9 @@ describe('periodStartsDuringEpisodes', () => {
     expect(periodStartsDuringEpisodes(d).map(x => x.start)).toEqual(['2016-01-05', '2016-02-10']);
   });
 
-  it('labels each start with the method in force', () => {
+  it('labels each start with the method in force at the transition', () => {
     const d = doc({
-      spans: [span('2016-01-05'), span('2016-07-05')],
+      spans: [span('2016-06-01'), span('2016-06-02')],
       birthControl: [episode('pill', '2016-01-01', '2016-06-01'), episode('implant', '2016-06-02')],
     });
     expect(periodStartsDuringEpisodes(d).map(x => x.method)).toEqual(['pill', 'implant']);
@@ -80,6 +80,38 @@ describe('divergenceSeries', () => {
 
   it('returns an empty series when nothing has been logged on a method', () => {
     expect(divergenceSeries(doc(), baseline)).toEqual([]);
+  });
+
+  // Multiply-then-round, not round-then-multiply. At a length of 28.5 the two
+  // agree on the first projection and diverge from the second onward: rounding
+  // the step first gives 2016-01-28, which is a day adrift, and six days adrift
+  // by the twelfth cycle.
+  it('projects a fractional length without accumulating drift', () => {
+    const d = doc({
+      spans: [span('2015-12-01'), span('2016-01-05'), span('2016-02-10')],
+      birthControl: [episode('implant', '2016-01-01')],
+    });
+    const series = divergenceSeries(d, { available: true, anchor: '2015-12-01', length: 28.5 });
+    expect(series.map(p => p.baseline)).toEqual(['2015-12-30', '2016-01-27']);
+  });
+
+  // A break in methods must not shift a later episode's projections. Numbering
+  // restarts per episode and each anchors on the last period before it began,
+  // so the natural period inside the gap is excluded and the implant's first
+  // row is measured from it rather than from the frozen baseline anchor.
+  it('restarts numbering and re-anchors after a gap between episodes', () => {
+    const d = doc({
+      spans: [span('2015-05-01'), span('2015-07-05'), span('2015-10-01'), span('2016-02-01')],
+      birthControl: [
+        episode('pill', '2015-06-01', '2015-08-31'),
+        episode('implant', '2016-01-01'),
+      ],
+    });
+    const series = divergenceSeries(d, baseline);
+    expect(series.map(p => p.actual)).toEqual(['2015-07-05', '2016-02-01']);
+    expect(series.map(p => p.index)).toEqual([1, 1]);
+    expect(series.map(p => p.baseline)).toEqual(['2015-05-29', '2015-10-29']);
+    expect(series.map(p => p.delta)).toEqual([37, 95]);
   });
 
   it('never produces NaN deltas', () => {
