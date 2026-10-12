@@ -36,6 +36,7 @@ export function divergenceSeries(doc, baseline) {
 
   const allStarts = [...(doc.spans ?? [])].map(span => span.start).sort((a, b) => a.localeCompare(b));
   const ordinals = new Map();
+  const anchors = new Map();
   const rows = [];
 
   for (const entry of periodStartsDuringEpisodes(doc)) {
@@ -47,7 +48,20 @@ export function divergenceSeries(doc, baseline) {
     // months after it.
     const n = (ordinals.get(entry.episodeStart) ?? 0) + 1;
     ordinals.set(entry.episodeStart, n);
-    const anchor = lastStartBefore(allStarts, entry.episodeStart) ?? baseline.anchor;
+
+    if (!anchors.has(entry.episodeStart)) {
+      anchors.set(entry.episodeStart, lastStartBefore(allStarts, entry.episodeStart));
+    }
+    const anchor = anchors.get(entry.episodeStart);
+
+    // No logged period before this episode means there is no "would have been"
+    // date to measure against, so the row is omitted rather than projected from
+    // a stale anchor. Falling back to `baseline.anchor` here would reproduce the
+    // very bug this function was rewritten to remove — a cycle projected from a
+    // pre-birth-control anchor years earlier. Unreachable through the normal
+    // pipeline (an available baseline implies logged periods before every
+    // episode) but reachable by a caller supplying its own baseline.
+    if (anchor === null) continue;
 
     // Multiply before rounding. Rounding the step first and then multiplying
     // drifts up to half a day per cycle — six days by the twelfth — and the

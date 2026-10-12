@@ -58,19 +58,31 @@ describe('divergenceSeries', () => {
   });
 
   it('reports a positive delta when the period came later than the baseline', () => {
-    const d = doc({ spans: [span('2016-01-05')], birthControl: [episode('implant', '2016-01-01')] });
+    const d = doc({ spans: [span('2015-12-01'), span('2016-01-05')], birthControl: [episode('implant', '2016-01-01')] });
     // baseline projection 1 is 2015-12-29; actual is 7 days later
     expect(divergenceSeries(d, baseline)[0].delta).toBe(7);
   });
 
   it('reports a negative delta when the period came earlier', () => {
-    const d = doc({ spans: [span('2015-12-20')], birthControl: [episode('implant', '2015-12-15')] });
+    const d = doc({ spans: [span('2015-12-01'), span('2015-12-20')], birthControl: [episode('implant', '2015-12-15')] });
     expect(divergenceSeries(d, baseline)[0].delta).toBe(-9);
   });
 
   it('reports zero when the period arrived exactly on the baseline', () => {
-    const d = doc({ spans: [span('2015-12-29')], birthControl: [episode('implant', '2015-12-15')] });
+    const d = doc({ spans: [span('2015-12-01'), span('2015-12-29')], birthControl: [episode('implant', '2015-12-15')] });
     expect(divergenceSeries(d, baseline)[0].delta).toBe(0);
+  });
+
+  // The anchor lookup must not fall back to the frozen baseline anchor. A row
+  // with no prior logged period has no counterfactual date; projecting one from
+  // a pre-birth-control anchor is the silent-wrong-value bug this function was
+  // rewritten to remove. Reachable here because `baseline` is a parameter.
+  it('omits a row when no period precedes the episode rather than using a stale anchor', () => {
+    const d = doc({
+      spans: [span('2016-02-01')],
+      birthControl: [episode('implant', '2016-01-01')],
+    });
+    expect(divergenceSeries(d, { available: true, anchor: '2015-12-01', length: 28 })).toEqual([]);
   });
 
   it('returns an empty series when the baseline is unavailable', () => {
