@@ -37,5 +37,8 @@ export function confidencePercent(sigma, nEff, windowDays = WINDOW_DAYS, k = SUF
   else p = erf(windowDays / (Math.abs(sigma) * Math.SQRT2));
 
   const percent = Math.round(100 * p * sufficiency);
+  // The clamp is defensive twice over: p and sufficiency are both within [0,1]
+  // so the product cannot leave [0,100], but Math.max also normalises a
+  // theoretical -0 to 0, which the project's no-negative-zero rule requires.
   return Math.min(100, Math.max(0, percent));
 }

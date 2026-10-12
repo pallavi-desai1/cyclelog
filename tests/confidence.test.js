@@ -32,8 +32,11 @@ describe('erf', () => {
     expect(erf(2)).toBeCloseTo(0.9953223, 6);
   });
 
-  it('is odd', () => {
-    expect(erf(-1)).toBeCloseTo(-erf(1), 10);
+  it('is odd, matching the table value at -1', () => {
+    // Asserts the literal rather than -erf(1). Oddness is structural in this
+    // implementation — the sign is split off before the series runs — so
+    // comparing the two calls would pass with any coefficients at all.
+    expect(erf(-1)).toBeCloseTo(-0.8427008, 6);
   });
 
   it('approaches 1 for large arguments', () => {
@@ -83,14 +86,38 @@ describe('confidencePercent', () => {
     expect(confidencePercent(0.0001, 9)).toBe(75);
   });
 
+  // A spread cannot legitimately be negative. Math.abs means one is read as its
+  // magnitude rather than making p negative and being flattened to 0% by the
+  // clamp — which would report no confidence for what is actually a tiny spread.
+  // The literal 58 does double duty: at a hardcoded window of 2 these same
+  // inputs give 48, so this test also fails if windowDays stops reaching the
+  // formula.
+  it('reads a negative spread as its magnitude', () => {
+    expect(confidencePercent(-3, 100)).toBe(58);
+    expect(confidencePercent(3, 100)).toBe(58);
+  });
+
+  // The window must actually reach the division. Pinning only the exported
+  // constant's value would let a hardcoded 2 inside the formula pass the whole
+  // suite.
+  it('widens with the window it is given', () => {
+    expect(confidencePercent(6, 1000, 1)).toBe(13);
+    expect(confidencePercent(6, 1000, 2)).toBe(26);
+    expect(confidencePercent(6, 1000, 2.5)).toBe(32);
+    expect(confidencePercent(6, 1000, 4)).toBe(49);
+  });
+
   // Review Focus 2: identical cycle lengths make sigma zero, and sigma is a
   // divisor. The answer is certainty within the window, not NaN.
   it('treats zero spread as certainty within the window', () => {
     expect(confidencePercent(0, 100)).toBe(Math.round(100 * (100 / 103)));
   });
 
-  it('treats a null spread as zero spread', () => {
-    expect(confidencePercent(null, 100)).toBe(confidencePercent(0, 100));
+  it('treats a null spread as certainty within the window', () => {
+    // Asserts the value, not merely that null and 0 share a branch. Comparing
+    // two calls of the function under test would pass even if that shared
+    // branch computed the wrong probability.
+    expect(confidencePercent(null, 100)).toBe(97);
   });
 
   it('returns null when there is no data at all', () => {
