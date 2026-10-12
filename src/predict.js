@@ -67,9 +67,16 @@ export function baselineModel(cycles, doc, todayISO) {
   const sigma = weightedSd(lengths, weights) ?? 0;
 
   // The anchor is the last pre-birth-control period start, which is the start
-  // of the cycle following the last baseline cycle.
+  // of the cycle following the last baseline cycle. `buildCycles` always
+  // populates `nextStart`, so this is present for any cycle it produced -- but
+  // falling back to `last.start` would move the anchor a full cycle early and
+  // report a counterfactual wrong by ~28 days with nothing to signal it. A
+  // missing anchor is a missing prediction, not a different one.
   const last = sample[sample.length - 1];
-  const anchor = last.nextStart ?? last.start;
+  const anchor = last.nextStart ?? null;
+  if (anchor === null) {
+    return unavailable('baseline', 'the last pre-birth-control cycle has no following period start');
+  }
 
   return {
     available: true,

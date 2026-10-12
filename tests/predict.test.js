@@ -27,6 +27,14 @@ const regularCycles = REGULAR_STARTS.map((start, i) => ({
   nextStart: REGULAR_STARTS[i + 1] ?? LAST_BASELINE_NEXT_START,
 }));
 
+describe('constants', () => {
+  // Pinned as a bare literal. The w = n/(n+TAU) test below builds its
+  // expectation from this export, so it would survive TAU itself being wrong.
+  it('uses a prior weight of three cycles', () => {
+    expect(TAU).toBe(3);
+  });
+});
+
 describe('lastPeriodStart', () => {
   it('returns the latest span start regardless of input order', () => {
     const d = doc({ spans: [span('2015-03-01', '2015-03-04'), span('2015-01-01', '2015-01-04')] });
@@ -100,10 +108,22 @@ describe('baselineModel', () => {
     expect(result.date).toBe('2016-06-16');
   });
 
-  it('reports a confidence between 0 and 100', () => {
-    const result = baselineModel(regularCycles, d, '2016-06-01');
-    expect(result.confidence).toBeGreaterThanOrEqual(0);
-    expect(result.confidence).toBeLessThanOrEqual(100);
+  // An exact figure, not a range: confidencePercent clamps its own output to
+  // 0-100, so a range assertion holds however wrong the sigma and nEff feeding
+  // it are. 72 is nEff 7.64 against zero spread, i.e. the discount term alone.
+  it('reports the confidence the weighted sample supports', () => {
+    expect(baselineModel(regularCycles, d, '2016-06-01').confidence).toBe(72);
+  });
+
+  // A missing anchor must produce no prediction rather than one that is a full
+  // cycle early. buildCycles never omits nextStart, so this guards the path a
+  // future producer -- manual entry, a partial sync -- could introduce.
+  it('is unavailable when the last baseline cycle has no following start', () => {
+    const noNext = regularCycles.map(({ nextStart, ...rest }) => rest);
+    const result = baselineModel(noNext, d, '2016-06-01');
+    expect(result.available).toBe(false);
+    expect(result.date).toBeNull();
+    expect(result.reason).toMatch(/no following period start/i);
   });
 
   it('gives high confidence to perfectly regular history', () => {
@@ -202,12 +222,14 @@ describe('adaptedModel', () => {
     expect(adaptedModel(withThree, baseDoc, '2016-06-01').weight).toBeCloseTo(3 / (3 + TAU), 10);
   });
 
-  it('drifts the length toward the observed episode mean', () => {
-    const base = baselineModel(regularCycles, baseDoc, '2016-06-01').length;
+  // The exact blended value, not a range. With three episode cycles w is 0.5,
+  // so the length is 0.5*28 + 0.5*40 = 34. A range of (28, 40) would pass for
+  // almost any wrong weight -- a w of 0.1 gives 29.2, comfortably inside it.
+  it('drifts the length to the exact blend of baseline and episode mean', () => {
     const withEpisode = [...regularCycles, cycle('2016-01-15', 40), cycle('2016-02-24', 40), cycle('2016-04-04', 40)];
     const adapted = adaptedModel(withEpisode, baseDoc, '2016-06-01');
-    expect(adapted.length).toBeGreaterThan(base);
-    expect(adapted.length).toBeLessThan(40);
+    expect(adapted.weight).toBe(0.5);
+    expect(adapted.length).toBe(34);
   });
 
   // Review Focus 4: a single episode cycle has no sample SD.
