@@ -14,13 +14,15 @@ describe('recencyWeight', () => {
   });
 
   it('halves the weight after one half-life', () => {
-    const older = '2016-01-01';
-    const reference = '2017-07-02'; // 548 days later
-    expect(recencyWeight(older, reference)).toBeCloseTo(0.5, 6);
+    // 2015-01-01 to 2016-07-02 is exactly 548 days.
+    expect(recencyWeight('2015-01-01', '2016-07-02')).toBeCloseTo(0.5, 6);
   });
 
   it('quarters the weight after two half-lives', () => {
-    expect(recencyWeight('2015-01-01', '2018-01-01', 548)).toBeCloseTo(0.5 ** (1096 / 548), 6);
+    // 2015-01-01 to 2016-12-31 is exactly 730 days, so at a 365-day half-life
+    // this is two half-lives. The expectation is the literal 0.25 rather than
+    // `0.5 ** (730/365)`, which would merely restate the implementation.
+    expect(recencyWeight('2015-01-01', '2016-12-31', 365)).toBeCloseTo(0.25, 10);
   });
 
   it('decays monotonically with age', () => {
