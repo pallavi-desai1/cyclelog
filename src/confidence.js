@@ -13,6 +13,11 @@ export function erf(x) {
   // 1e-9 there — small enough to be harmless and large enough to look like a
   // bug to anyone who prints it. Short-circuit so the identity holds exactly.
   if (x === 0) return 0;
+  // NaN is neither > 0 nor < 0, so `x > 0 ? 1 : -1` would silently return -1
+  // for it -- a wrong number that happens to satisfy the no-NaN rule rather
+  // than a correct one. ±Infinity really is ±1 mathematically, so only NaN is
+  // rejected here.
+  if (Number.isNaN(x)) throw new TypeError('erf requires a number, got NaN');
   if (!Number.isFinite(x)) return x > 0 ? 1 : -1;
   const sign = x < 0 ? -1 : 1;
   const z = Math.abs(x);

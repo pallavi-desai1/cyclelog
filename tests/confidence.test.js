@@ -48,6 +48,16 @@ describe('erf', () => {
       expect(Math.abs(erf(x))).toBeLessThanOrEqual(1);
     }
   });
+
+  // Minor 1: NaN is neither > 0 nor < 0, so the ±Infinity shortcut would
+  // silently return -1 for it -- a wrong answer that happens to be a number,
+  // which is exactly the pattern this project refuses elsewhere. Reject it
+  // instead of returning a plausible-looking lie. confidencePercent itself
+  // guards before calling erf, so nothing in this codebase reaches this path
+  // today; it is here so a future caller cannot reintroduce it silently.
+  it('throws on NaN rather than returning a wrong number', () => {
+    expect(() => erf(NaN)).toThrow(TypeError);
+  });
 });
 
 describe('confidencePercent', () => {
@@ -110,7 +120,7 @@ describe('confidencePercent', () => {
   // Review Focus 2: identical cycle lengths make sigma zero, and sigma is a
   // divisor. The answer is certainty within the window, not NaN.
   it('treats zero spread as certainty within the window', () => {
-    expect(confidencePercent(0, 100)).toBe(Math.round(100 * (100 / 103)));
+    expect(confidencePercent(0, 100)).toBe(97);
   });
 
   it('treats a null spread as certainty within the window', () => {
