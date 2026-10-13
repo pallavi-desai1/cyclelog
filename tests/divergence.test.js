@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { periodStartsDuringEpisodes, divergenceSeries, meanShift } from '../src/divergence.js';
+import {
+  periodStartsDuringEpisodes, divergenceSeries, meanShift, meanShiftByEpisode,
+} from '../src/divergence.js';
 
 const span = (start) => ({ start, end: null, precision: 'exact', endPrecision: null, source: 'clue' });
 const episode = (method, startedOn, endedOn = null) => ({ method, startedOn, endedOn, expectedEffect: 'suppress' });
 const doc = (overrides = {}) => ({ version: 1, birthControl: [], days: {}, spans: [], gaps: [], ...overrides });
+const gap = (from, to) => ({ from, to, reason: 'not logged' });
 
 const baseline = { available: true, anchor: '2015-12-01', length: 28 };
 
@@ -128,12 +131,60 @@ describe('divergenceSeries', () => {
 
   it('never produces NaN deltas', () => {
     const d = doc({
-      spans: [span('2016-01-05'), span('2016-02-10')],
+      spans: [span('2015-12-01'), span('2016-01-05'), span('2016-02-10')],
       birthControl: [episode('implant', '2016-01-01')],
     });
-    for (const point of divergenceSeries(d, baseline)) {
+    const series = divergenceSeries(d, baseline);
+    // Without this the loop below can silently run zero times, which is exactly
+    // how this test came to assert nothing.
+    expect(series.length).toBeGreaterThan(0);
+    for (const point of series) {
       expect(Number.isNaN(point.delta)).toBe(false);
     }
+  });
+
+  // Minor 6: so the renderer can caveat an inflated delta without re-deriving
+  // the gap rule itself.
+  it('flags a row true when a logged gap overlaps the projected-to-actual interval', () => {
+    const d = doc({
+      spans: [span('2015-12-01'), span('2016-01-05')],
+      birthControl: [episode('implant', '2016-01-01')],
+      gaps: [gap('2015-12-30', '2015-12-31')],
+    });
+    // series[0]: baseline (projected) 2015-12-29, actual 2016-01-05 -- the gap
+    // sits inside that interval.
+    const series = divergenceSeries(d, baseline);
+    expect(series[0].baseline).toBe('2015-12-29');
+    expect(series[0].spansGap).toBe(true);
+  });
+
+  it('flags a row false when no logged gap overlaps the interval', () => {
+    const d = doc({
+      spans: [span('2015-12-01'), span('2016-01-05')],
+      birthControl: [episode('implant', '2016-01-01')],
+      gaps: [gap('2010-01-01', '2010-01-02')],
+    });
+    const series = divergenceSeries(d, baseline);
+    expect(series[0].spansGap).toBe(false);
+  });
+});
+
+describe('meanShiftByEpisode', () => {
+  it('breaks the mean shift out by episode', () => {
+    const series = [
+      { episodeStart: '2016-01-01', method: 'implant', delta: 4 },
+      { episodeStart: '2016-01-01', method: 'implant', delta: 8 },
+      { episodeStart: '2015-06-01', method: 'pill', delta: -2 },
+    ];
+    const result = meanShiftByEpisode(series);
+    expect(result).toEqual([
+      { episodeStart: '2016-01-01', method: 'implant', n: 2, meanShift: 6 },
+      { episodeStart: '2015-06-01', method: 'pill', n: 1, meanShift: -2 },
+    ]);
+  });
+
+  it('returns an empty array for an empty series', () => {
+    expect(meanShiftByEpisode([])).toEqual([]);
   });
 });
 

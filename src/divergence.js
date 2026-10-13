@@ -1,5 +1,6 @@
 import { addDays, diffDays } from './dates.js';
 import { episodeAt } from './cycles.js';
+import { lastPeriodStartOnOrBefore } from './episodes.js';
 
 export function periodStartsDuringEpisodes(doc) {
   // episodeAt already owns "which episode was in force on this date", including
@@ -16,25 +17,18 @@ export function periodStartsDuringEpisodes(doc) {
     .filter(entry => entry !== null);
 }
 
-function lastStartBefore(allStarts, iso) {
-  let found = null;
-  for (const start of allStarts) {
-    if (start < iso) found = start;
-    else break;
-  }
-  return found;
-}
-
 // Each actual period start during birth control is paired with the nth
 // projection of the frozen baseline. Pairing by index is what makes this read
 // as "this cycle came N days later than it would have", cycle by cycle.
 export function divergenceSeries(doc, baseline) {
   if (!baseline || baseline.available !== true) return [];
+  // baseline.anchor itself is never used below (each row re-anchors per
+  // episode via lastPeriodStartOnOrBefore) -- this is a well-formedness check
+  // on the baseline object, not a value this function consumes.
   if (!baseline.anchor || !Number.isFinite(baseline.length)) return [];
   const length = baseline.length;
   if (!(length > 0)) return [];
 
-  const allStarts = [...(doc.spans ?? [])].map(span => span.start).sort((a, b) => a.localeCompare(b));
   const ordinals = new Map();
   const anchors = new Map();
   const rows = [];
@@ -50,7 +44,7 @@ export function divergenceSeries(doc, baseline) {
     ordinals.set(entry.episodeStart, n);
 
     if (!anchors.has(entry.episodeStart)) {
-      anchors.set(entry.episodeStart, lastStartBefore(allStarts, entry.episodeStart));
+      anchors.set(entry.episodeStart, lastPeriodStartOnOrBefore(doc, entry.episodeStart));
     }
     const anchor = anchors.get(entry.episodeStart);
 
@@ -69,6 +63,13 @@ export function divergenceSeries(doc, baseline) {
     // even-sized sample.
     const projected = addDays(anchor, Math.round(length * n));
 
+    // [projected, actual] can run in either direction (a negative delta puts
+    // actual before projected), so the interval bounds must be sorted before
+    // testing a gap for overlap.
+    const lo = projected < entry.start ? projected : entry.start;
+    const hi = projected < entry.start ? entry.start : projected;
+    const spansGap = (doc.gaps ?? []).some(gap => gap.from <= hi && gap.to >= lo);
+
     rows.push({
       index: n,
       actual: entry.start,
@@ -76,6 +77,7 @@ export function divergenceSeries(doc, baseline) {
       delta: diffDays(projected, entry.start),
       method: entry.method,
       episodeStart: entry.episodeStart,
+      spansGap,
     });
   }
 
@@ -86,4 +88,23 @@ export function meanShift(series) {
   const deltas = (series ?? []).map(point => point.delta).filter(Number.isFinite);
   if (deltas.length === 0) return null;
   return deltas.reduce((total, d) => total + d, 0) / deltas.length;
+}
+
+// Spec 6.5 asks for the mean shift broken out by episode. One blended figure
+// across a pill-then-implant history describes neither method.
+export function meanShiftByEpisode(series) {
+  const groups = new Map();
+  for (const point of series ?? []) {
+    if (!Number.isFinite(point.delta)) continue;
+    if (!groups.has(point.episodeStart)) {
+      groups.set(point.episodeStart, { episodeStart: point.episodeStart, method: point.method, deltas: [] });
+    }
+    groups.get(point.episodeStart).deltas.push(point.delta);
+  }
+  return [...groups.values()].map(g => ({
+    episodeStart: g.episodeStart,
+    method: g.method,
+    n: g.deltas.length,
+    meanShift: g.deltas.reduce((t, d) => t + d, 0) / g.deltas.length,
+  }));
 }
