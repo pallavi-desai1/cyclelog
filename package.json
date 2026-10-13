@@ -9,6 +9,7 @@
     "test:watch": "vitest",
     "build-seed": "node scripts/build-seed.mjs",
     "verify": "node scripts/verify-real-import.mjs",
+    "predict": "node scripts/predict-report.mjs",
     "check:privacy": "node scripts/check-privacy.mjs"
   },
   "devDependencies": { "vitest": "^2.1.0" }

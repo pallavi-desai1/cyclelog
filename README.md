@@ -19,6 +19,19 @@ npm install
 npm test
 ```
 
+### Predictions
+
+```bash
+npm run predict            # uses today's date
+npm run predict -- private/measurements.json private/legacy_periods.txt 2027-06-01
+```
+
+Prints the baseline model (what the natural cycle would do), the adapted model
+(what it is actually doing on the current method), and the per-cycle divergence
+between them. The script asserts only universal invariants — confidence within
+0–100, no `NaN`, no prediction in the past — never any specific figure, so it
+carries no personal data.
+
 ## Importing the owner's history
 
 Place the source files under `private/` (gitignored), then:
