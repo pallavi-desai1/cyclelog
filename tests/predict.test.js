@@ -3,6 +3,7 @@ import {
   TAU, lastPeriodStart, projectForward, baselineModel, adaptedModel, predict,
 } from '../src/predict.js';
 import { describeLengths } from '../src/stats.js';
+import { lastPeriodStartOnOrBefore } from '../src/episodes.js';
 
 const span = (start, end) => ({ start, end, precision: 'exact', endPrecision: 'exact', source: 'clue' });
 const cycle = (start, length, extra = {}) => ({
@@ -82,6 +83,15 @@ describe('projectForward', () => {
   it('gives up rather than looping past the step cap', () => {
     expect(projectForward('2015-01-01', 1, '2015-06-01', 3)).toBeNull();
   });
+
+  // I4: multiply before rounding. At length 28.5 the 25th step is
+  // round(28.5 * 25) = 713 days out, landing on 2016-12-14. Rounding the
+  // step first (round(28.5) = 29, half a day high every cycle) lands on
+  // 2016-12-26 by then -- twelve days of accumulated drift over the same
+  // twenty-five cycles.
+  it('multiplies before rounding over many steps at a fractional length', () => {
+    expect(projectForward('2015-01-01', 28.5, '2016-12-10')).toBe('2016-12-14');
+  });
 });
 
 describe('baselineModel', () => {
@@ -118,9 +128,22 @@ describe('baselineModel', () => {
   // A missing anchor must produce no prediction rather than one that is a full
   // cycle early. buildCycles never omits nextStart, so this guards the path a
   // future producer -- manual entry, a partial sync -- could introduce.
+  //
+  // After C1a, baselineCycles itself requires every surviving cycle to carry a
+  // valid nextStart whenever a first episode exists -- so stripping nextStart
+  // from only the LAST chronological cycle while an episode is present just
+  // drops that one cycle from the sample; the new last-of-sample already has
+  // a valid nextStart and the model succeeds. The anchor-null branch this test
+  // guards is only still reachable through baselineCycles' no-episode
+  // fallback (it returns usableCycles unfiltered when there is no first
+  // episode at all), so this test now uses a doc with no birth-control
+  // history to exercise it.
   it('is unavailable when the last baseline cycle has no following start', () => {
-    const noNext = regularCycles.map(({ nextStart, ...rest }) => rest);
-    const result = baselineModel(noNext, d, '2016-06-01');
+    const noEpisode = doc();
+    const noNextLast = regularCycles.map(
+      (c, i) => (i === regularCycles.length - 1 ? (({ nextStart, ...rest }) => rest)(c) : c),
+    );
+    const result = baselineModel(noNextLast, noEpisode, '2016-06-01');
     expect(result.available).toBe(false);
     expect(result.date).toBeNull();
     expect(result.reason).toMatch(/no following period start/i);
@@ -142,11 +165,23 @@ describe('baselineModel', () => {
     expect(noisy.confidence).toBeLessThan(steady.confidence);
   });
 
-  it('does not move when cycles are added after the first episode', () => {
+  // The straddling cycle is what makes this discriminate: it starts before the
+  // episode and ends after it, so the old `start <` rule admitted it while the
+  // correct whole-cycle rule rejects it. Without it, a buggy and a correct
+  // implementation produce identical output. Asserts sigma, nEff and anchor too
+  // -- those are the fields contamination actually moves. '2015-11-20' is used
+  // (not '2015-11-05', which collides with regularCycles' last start) so the
+  // straddling cycle starts before the 2016-01-01 episode and ends
+  // ('2016-02-20') after it.
+  it('does not move when a cycle straddles the first episode', () => {
     const before = baselineModel(regularCycles, d, '2016-06-01');
-    const withLater = [...regularCycles, cycle('2016-02-01', 45), cycle('2016-04-01', 50)];
-    const after = baselineModel(withLater, d, '2016-06-01');
+    const straddling = [...regularCycles,
+      { ...cycle('2015-11-20', 107), nextStart: '2016-02-20' }];
+    const after = baselineModel(straddling, d, '2016-06-01');
     expect(after.length).toBe(before.length);
+    expect(after.sigma).toBe(before.sigma);
+    expect(after.nEff).toBe(before.nEff);
+    expect(after.anchor).toBe(before.anchor);
     expect(after.date).toBe(before.date);
   });
 
@@ -174,6 +209,39 @@ describe('baselineModel', () => {
         expect(Number.isNaN(value)).toBe(false);
       }
     }
+  });
+
+  // Minor 2: `available: true` with `date: null` would be representable if
+  // projectForward hits its step cap. `available` must mean "has a usable
+  // date" -- a today far enough out that MAX_PROJECTIONS (2000 cycles of ~28
+  // days) cannot reach it must report unavailable, not a null date.
+  it('is unavailable rather than available-with-a-null-date when the step cap is hit', () => {
+    const result = baselineModel(regularCycles, d, '2200-01-01');
+    expect(result.available).toBe(false);
+    expect(result.date).toBeNull();
+    expect(result.reason).toMatch(/step cap/i);
+  });
+
+  // C1b: predict.js derives its anchor from `last.nextStart`; divergence.js
+  // derives its anchor from the shared `lastPeriodStartOnOrBefore`. They must
+  // agree even at the boundary -- a period starting exactly on the day the
+  // episode started. Built so the last baseline cycle's nextStart lands
+  // exactly on the episode's startedOn (the inclusive case C1a allows), and a
+  // span is logged on that same date.
+  it('agrees with lastPeriodStartOnOrBefore when a period starts exactly on the episode start date', () => {
+    const boundary = doc({
+      spans: [span('2015-01-01', '2015-01-04'), span('2016-01-01', '2016-01-04')],
+      birthControl: [episode('implant', '2016-01-01')],
+    });
+    const boundaryCycles = [
+      cycle('2015-01-01', 28, { nextStart: '2015-01-29' }),
+      cycle('2015-01-29', 28, { nextStart: '2016-01-01' }),
+    ];
+    const result = baselineModel(boundaryCycles, boundary, '2016-06-01');
+    expect(result.available).toBe(true);
+    expect(result.anchor).toBe('2016-01-01');
+    expect(lastPeriodStartOnOrBefore(boundary, '2016-01-01')).toBe('2016-01-01');
+    expect(result.anchor).toBe(lastPeriodStartOnOrBefore(boundary, '2016-01-01'));
   });
 });
 
@@ -311,6 +379,9 @@ describe('predict', () => {
     const withEpisode = [...regularCycles, cycle('2016-01-15', 45), cycle('2016-02-29', 45), cycle('2016-04-14', 45)];
     const result = predict(withEpisode, d, '2016-06-01');
     expect(result.adapted.length).not.toBe(result.baseline.length);
+    // The premise of the side-by-side screen is that the two models can
+    // actually land on different dates, not just different lengths.
+    expect(result.adapted.date).not.toBe(result.baseline.date);
   });
 
   it('is deterministic across repeated calls', () => {

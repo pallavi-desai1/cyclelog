@@ -32,18 +32,17 @@ export function lastPeriodStart(doc) {
 
 export function projectForward(anchorISO, lengthDays, todayISO, maxSteps = MAX_PROJECTIONS) {
   if (!anchorISO) return null;
-  if (!Number.isFinite(lengthDays)) return null;
-  const step = Math.round(lengthDays);
-  if (!(step > 0)) return null;
+  if (!Number.isFinite(lengthDays) || !(lengthDays > 0)) return null;
 
-  let date = addDays(anchorISO, step);
-  let steps = 1;
-  while (date < todayISO) {
-    if (steps >= maxSteps) return null;
-    date = addDays(date, step);
-    steps += 1;
+  // Multiply before rounding. Stepping a pre-rounded length drifts up to half a
+  // day per cycle — fifteen days over three years at a length of 28.5 — and
+  // `divergence.js` projects the same baseline by multiplying, so stepping here
+  // would make two numbers on one screen disagree.
+  for (let n = 1; n <= maxSteps; n += 1) {
+    const date = addDays(anchorISO, Math.round(lengthDays * n));
+    if (date >= todayISO) return date;
   }
-  return date;
+  return null;
 }
 
 export function baselineModel(cycles, doc, todayISO) {
@@ -78,10 +77,18 @@ export function baselineModel(cycles, doc, todayISO) {
     return unavailable('baseline', 'the last pre-birth-control cycle has no following period start');
   }
 
+  // `available: true` with a `date` of `null` would be representable
+  // otherwise, if `projectForward` hits its step cap. `available` must mean
+  // "has a usable date", so that case is reported as unavailable instead.
+  const date = projectForward(anchor, length, todayISO);
+  if (date === null) {
+    return unavailable('baseline', 'projection exceeded the step cap without reaching today');
+  }
+
   return {
     available: true,
     model: 'baseline',
-    date: projectForward(anchor, length, todayISO),
+    date,
     length,
     sigma,
     confidence: confidencePercent(sigma, nEff),
@@ -101,11 +108,15 @@ export function adaptedModel(cycles, doc, todayISO) {
   // re-anchored on the most recent period.
   if (episode === null) {
     if (!base.available) return { ...base, model: 'no-episode' };
+    const noEpisodeDate = projectForward(anchor, base.length, todayISO);
+    if (noEpisodeDate === null) {
+      return unavailable('no-episode', 'projection exceeded the step cap without reaching today');
+    }
     return {
       ...base,
       model: 'no-episode',
       anchor,
-      date: projectForward(anchor, base.length, todayISO),
+      date: noEpisodeDate,
       weight: 0,
     };
   }
@@ -159,10 +170,16 @@ export function adaptedModel(cycles, doc, todayISO) {
     return unavailable('adapted', 'not enough usable data to form a prediction');
   }
 
+  // Same "available must mean has-a-date" guard as baselineModel.
+  const adaptedDate = projectForward(anchor, length, todayISO);
+  if (adaptedDate === null) {
+    return unavailable('adapted', 'projection exceeded the step cap without reaching today');
+  }
+
   return {
     available: true,
     model: 'adapted',
-    date: projectForward(anchor, length, todayISO),
+    date: adaptedDate,
     length,
     sigma,
     confidence: confidencePercent(sigma, nEff),
