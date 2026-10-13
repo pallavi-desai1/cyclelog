@@ -459,17 +459,25 @@ describe('predictionStatus', () => {
     expect(predictionStatus('2015-02-01', '2015-03-01', false)).toEqual({ status: 'late', daysLate: 28 });
   });
 
-  // daysLate stays populated in not-expected: "no period in 63 days" is
-  // clinically relevant even when the card does not lead with it.
-  it('keeps the day count in the not-expected state', () => {
+  // Measures from whatever date it is given; the MODEL decides which date that
+  // is, and the model-level tests below are what prove the count accumulates.
+  // An earlier version of this test asserted 63 days here and read as proof of
+  // cumulative counting while only exercising this function's subtraction.
+  it('counts from the date it is given, however far back', () => {
     expect(predictionStatus('2015-02-01', '2015-04-05', true).daysLate).toBe(63);
   });
 });
 
 describe('model status fields', () => {
+  // The episode begins AFTER the last logged period, which mirrors the owner's
+  // real situation: her method was started several weeks into a cycle, with
+  // nothing logged since. A fixture where she has already bled on the method is
+  // a different case, covered in its own describe block below. (Deliberately
+  // described rather than dated — the privacy guard flags real dates in tracked
+  // content, and it caught an earlier draft of this very comment.)
   const suppressDoc = doc({
     spans: [span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08')],
-    birthControl: [episode('implant', '2016-01-01', null, 'suppress')],
+    birthControl: [episode('implant', '2016-01-20', null, 'suppress')],
   });
 
   // Review Focus 1: `date` is always ahead, `previousDate` always behind.
@@ -560,5 +568,88 @@ describe('model status fields', () => {
         for (const value of Object.values(model)) expect(Number.isNaN(value)).toBe(false);
       }
     }
+  });
+});
+
+describe('overdue counting accumulates', () => {
+  const offMethod = doc({
+    spans: [span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08')],
+  });
+  const onImplant = doc({
+    spans: [span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08')],
+    birthControl: [episode('implant', '2016-01-20', null, 'suppress')],
+  });
+
+  // The headline figure must keep running. Measured from the most recent passed
+  // projection it sawtooths: 28, then 1, then 27, then 1 — so a woman 57 days
+  // without a period off birth control was told "1 DAY LATE".
+  it('keeps counting past a second projection boundary', () => {
+    // last period 2016-01-05, length 28, so due 2016-02-02; 2016-03-02 is 29
+    // days past that and 57 days since the period itself.
+    expect(predict(regularCycles, offMethod, '2016-03-02').adapted.daysLate).toBe(29);
+  });
+
+  it('never resets the count while a period stays missing', () => {
+    let last = 0;
+    for (const today of ['2016-02-04', '2016-03-01', '2016-03-02', '2016-03-28', '2016-05-01']) {
+      const { daysLate } = predict(regularCycles, offMethod, today).adapted;
+      expect(daysLate).toBeGreaterThan(last);
+      last = daysLate;
+    }
+  });
+
+  // Spec 6.2a justifies populating daysLate in this state with "no period in
+  // 63 days is clinically relevant". The old implementation capped at 27.
+  it('counts amenorrhea from the due date, not the last projection', () => {
+    const { adapted } = predict(regularCycles, onImplant, '2016-03-20');
+    expect(adapted.status).toBe('not-expected');
+    expect(adapted.daysLate).toBe(47);
+  });
+
+  // The ghost's sawtooth is specified and correct: spec 6.2a says its daysLate
+  // cycles 1..27 as each projection passes. The adapted fix must not change it.
+  it('leaves the baseline cycling within one cycle length', () => {
+    for (const today of ['2016-03-20', '2016-09-01', '2017-06-01']) {
+      const { baseline } = predict(regularCycles, onImplant, today);
+      expect(baseline.daysLate).toBeLessThan(28);
+      expect(baseline.daysLate).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('bleeding on a suppressing method', () => {
+  // Spec 6.2a: "Roughly one in five implant users keep bleeding. A single
+  // logged period is evidence the owner is in that group, so the model returns
+  // to predicting dates." Previously she was told NO PERIOD EXPECTED again four
+  // days after every prediction, despite documented monthly bleeding.
+  const bleeding = doc({
+    spans: [
+      span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08'),
+      span('2016-02-10', '2016-02-13'), span('2016-03-20', '2016-03-23'),
+    ],
+    birthControl: [episode('implant', '2016-01-01', null, 'suppress')],
+  });
+
+  it('predicts dates once a period has been logged on the method', () => {
+    expect(predict(regularCycles, bleeding, '2016-04-25').adapted.status).toBe('late');
+    expect(predict(regularCycles, bleeding, '2016-05-20').adapted.status).toBe('late');
+  });
+
+  it('still reports not-expected when nothing has been logged on the method', () => {
+    const nothingYet = doc({
+      spans: [span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08')],
+      birthControl: [episode('implant', '2016-01-20', null, 'suppress')],
+    });
+    expect(predict(regularCycles, nothingYet, '2016-02-20').adapted.status).toBe('not-expected');
+  });
+
+  // Review Focus: `suppressing` is `=== 'suppress'`, so a third effect must not
+  // accidentally qualify. A copper IUD does not suppress bleeding.
+  it('keeps counting late on a method expected to do nothing to the cycle', () => {
+    const copper = doc({
+      spans: [span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08')],
+      birthControl: [episode('copper-iud', '2016-01-20', null, 'none')],
+    });
+    expect(predict(regularCycles, copper, '2016-02-20').adapted.status).toBe('late');
   });
 });

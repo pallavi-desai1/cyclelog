@@ -70,6 +70,16 @@ export function projectPrevious(anchorISO, lengthDays, todayISO, maxSteps = MAX_
   return null;
 }
 
+// The first projection after the anchor — the date the period was actually due.
+// Lateness is measured from here, never from the most recent passed projection:
+// that would sawtooth back to 1 at every cycle boundary, so a woman 57 days
+// overdue would read "1 day late".
+export function firstProjection(anchorISO, lengthDays) {
+  if (!anchorISO) return null;
+  if (!Number.isFinite(lengthDays) || !(lengthDays > 0)) return null;
+  return addDays(anchorISO, Math.round(lengthDays));
+}
+
 // `suppressing` is whether the method in force TODAY is expected to suppress
 // bleeding. Read at today, not at the cycle's start: a method begun mid-cycle
 // would otherwise report "late" forever.
@@ -163,7 +173,9 @@ export function adaptedModel(cycles, doc, todayISO) {
     // method is in force, so absence is never "expected" — a period overdue off
     // birth control is simply late, and keeps counting.
     const nePrevious = projectPrevious(anchor, base.length, todayISO);
-    const neStatus = predictionStatus(nePrevious, todayISO, false);
+    // Counted from the due date so it keeps running; off birth control a period
+    // overdue is simply late, and absence is never the expectation.
+    const neStatus = predictionStatus(firstProjection(anchor, base.length), todayISO, false);
     return {
       ...base,
       model: 'no-episode',
@@ -235,8 +247,19 @@ export function adaptedModel(cycles, doc, todayISO) {
   // by `currentEpisode(doc, todayISO)` — not the episode at the cycle's start.
   // A method begun mid-cycle would otherwise report "late" indefinitely.
   const previousDate = projectPrevious(anchor, length, todayISO);
+
+  // A period logged inside the episode is evidence she is one of the roughly
+  // one in five who keep bleeding on an implant. That closes the question
+  // "will I bleed at all" for this episode, so the model returns to predicting
+  // dates with the widened sigma rather than re-asserting absence after every
+  // prediction. The anchor IS the most recent period start, so it sitting after
+  // the episode began is exactly that evidence.
+  const bledOnThisMethod = anchor > episode.startedOn;
+  const suppressing = episode.expectedEffect === 'suppress' && !bledOnThisMethod;
+
+  // Measured from the due date, not `previousDate` — see firstProjection.
   const { status, daysLate } = predictionStatus(
-    previousDate, todayISO, episode.expectedEffect === 'suppress',
+    firstProjection(anchor, length), todayISO, suppressing,
   );
 
   return {

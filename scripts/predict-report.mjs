@@ -51,11 +51,6 @@ show('last 12 median', stats.last12.median);
 show('current cycle day', current ? current.dayOfCycle : 'n/a');
 show('method in force', episode ? `${episode.method} since ${episode.startedOn}` : 'none');
 
-// "next date" below is simply the model's forward projection -- it does not
-// distinguish an overdue cycle (today already past the projected date's
-// window) from one still ahead. That distinction belongs to the app's UI
-// layer, not this report script, and is deliberately deferred to the app
-// plan rather than an oversight here.
 console.log('\nbaseline (what the natural cycle would do)');
 if (baseline.available) {
   show('length', baseline.length.toFixed(2));
@@ -71,30 +66,40 @@ if (baseline.available) {
   show('unavailable', baseline.reason);
 }
 
+// Built as lines rather than printed directly, so the no-percentage rule in
+// spec 6.2b can be ASSERTED below instead of merely eyeballed. Re-adding a
+// confidence figure to the not-expected branch would otherwise fail nothing.
+const adaptedLines = (model) => {
+  if (!model.available) return [['unavailable', model.reason]];
+  if (model.status === 'not-expected') {
+    // No confidence percentage here, deliberately. A date asserted at low
+    // confidence is less useful than naming the expectation; printing both
+    // would re-create the problem this state exists to solve.
+    return [
+      ['status', 'NO PERIOD EXPECTED'],
+      ['if one comes', `most likely around ${model.date}`],
+      ['days since due', days(model.daysLate)],
+      ['spread (sigma)', model.sigma.toFixed(2)],
+    ];
+  }
+  // An overdue period leads, because it is the more actionable fact.
+  const status = model.status === 'late'
+    ? `${days(model.daysLate).toUpperCase()} LATE`
+    : 'on time so far';
+  return [
+    ['status', status],
+    ['model', model.model],
+    ['episode weight (w)', model.weight.toFixed(3)],
+    ['length', model.length.toFixed(2)],
+    ['spread (sigma)', model.sigma.toFixed(2)],
+    ['effective sample', model.nEff.toFixed(1)],
+    ['next date', `${model.date} - ${model.confidence}% confident`],
+  ];
+};
+
+const adaptedBlock = adaptedLines(adapted);
 console.log('\nadapted (what it is actually doing)');
-if (!adapted.available) {
-  show('unavailable', adapted.reason);
-} else if (adapted.status === 'not-expected') {
-  // No confidence percentage here, deliberately (spec 6.2b). A date asserted at
-  // low confidence is less useful than naming the expectation; printing both
-  // would re-create the problem this state exists to solve.
-  show('status', 'NO PERIOD EXPECTED');
-  show('if one comes', `most likely around ${adapted.date}`);
-  show('days since due', days(adapted.daysLate));
-  show('spread (sigma)', adapted.sigma.toFixed(2));
-} else {
-  // An overdue period leads, because it is the more actionable fact. The report
-  // does not yet distinguish how FAR past the grace window a non-suppressing
-  // method is beyond the day count itself — deliberately deferred to the app
-  // plan rather than overlooked.
-  if (adapted.status === 'late') show('status', `${days(adapted.daysLate).toUpperCase()} LATE`);
-  show('model', adapted.model);
-  show('episode weight (w)', adapted.weight.toFixed(3));
-  show('length', adapted.length.toFixed(2));
-  show('spread (sigma)', adapted.sigma.toFixed(2));
-  show('effective sample', adapted.nEff.toFixed(1));
-  show('next date', `${adapted.date} - ${adapted.confidence}% confident`);
-}
+for (const [label, value] of adaptedBlock) show(label, value);
 
 console.log('\ndivergence (actual minus baseline, per cycle on a method)');
 if (series.length === 0) console.log('  none yet');
@@ -129,9 +134,20 @@ const checkModel = (name, model) => {
   if (!allowed.includes(model.status)) problems.push(`${name}: status ${model.status} not one of ${allowed.join('/')}`);
   if (model.status === 'late' && !(model.daysLate > 0)) problems.push(`${name}: late without a positive day count`);
   if (model.status === 'upcoming' && model.daysLate !== null) problems.push(`${name}: upcoming with a day count`);
+  // The number the not-expected state carries is the clinically load-bearing
+  // one ("no period in 63 days"), so it must be present and positive.
+  if (model.status === 'not-expected' && !(model.daysLate > 0)) problems.push(`${name}: not-expected without a positive day count`);
 };
 checkModel('baseline', baseline);
 checkModel('adapted', adapted);
+
+// Spec 6.2b, enforced rather than observed: the not-expected state asserts no
+// confidence figure. This runs on every invocation, including against the real
+// data, so the rule cannot rot.
+if (adapted.available && adapted.status === 'not-expected') {
+  const withPercent = adaptedBlock.filter(([, value]) => String(value).includes('%'));
+  for (const [label] of withPercent) problems.push(`adapted: not-expected state printed a percentage in "${label}"`);
+}
 for (const point of series) {
   if (!Number.isFinite(point.delta)) problems.push(`divergence ${point.index}: delta is not finite`);
 }
