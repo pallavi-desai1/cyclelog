@@ -6,14 +6,25 @@ import { mergeSources } from '../src/merge.js';
 import { buildCycles, currentCycle } from '../src/cycles.js';
 import { cycleStats } from '../src/stats.js';
 import { predict } from '../src/predict.js';
-import { divergenceSeries, meanShift } from '../src/divergence.js';
+import { divergenceSeries, meanShift, meanShiftByEpisode } from '../src/divergence.js';
 import { currentEpisode } from '../src/episodes.js';
 
 const [cluePath = 'private/measurements.json',
        legacyPath = 'private/legacy_periods.txt',
        todayArg] = process.argv.slice(2);
 
-const today = todayArg ?? new Date().toISOString().slice(0, 10);
+// Local date parts, not toISOString(), which is UTC: an evening run in US
+// Central would otherwise date the report tomorrow and report the cycle day
+// one too high. This is a script, so local time is the right call here.
+const defaultToday = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const today = todayArg ?? defaultToday();
 
 const legacy = parseLegacyLog(readFileSync(legacyPath, 'utf8'));
 const clue = parseClueMeasurements(JSON.parse(readFileSync(cluePath, 'utf8')));
@@ -23,6 +34,7 @@ const stats = cycleStats(cycles);
 const { baseline, adapted } = predict(cycles, doc, today);
 const series = divergenceSeries(doc, baseline);
 const shift = meanShift(series);
+const shiftByEpisode = meanShiftByEpisode(series);
 const episode = currentEpisode(doc, today);
 const current = currentCycle(doc, today);
 
@@ -36,6 +48,11 @@ show('last 12 median', stats.last12.median);
 show('current cycle day', current ? current.dayOfCycle : 'n/a');
 show('method in force', episode ? `${episode.method} since ${episode.startedOn}` : 'none');
 
+// "next date" below is simply the model's forward projection -- it does not
+// distinguish an overdue cycle (today already past the projected date's
+// window) from one still ahead. That distinction belongs to the app's UI
+// layer, not this report script, and is deliberately deferred to the app
+// plan rather than an oversight here.
 console.log('\nbaseline (what the natural cycle would do)');
 if (baseline.available) {
   show('length', baseline.length.toFixed(2));
@@ -65,6 +82,11 @@ for (const point of series) {
   console.log(`  ${point.index}. actual ${point.actual}  baseline ${point.baseline}  ${sign}${point.delta}d  (${point.method})`);
 }
 if (shift !== null) show('mean shift', `${shift >= 0 ? '+' : ''}${shift.toFixed(1)} days`);
+// Spec 6.5: the mean shift broken out by episode, beneath the blended figure.
+for (const g of shiftByEpisode) {
+  const sign = g.meanShift >= 0 ? '+' : '';
+  show(`  mean shift (${g.method})`, `${sign}${g.meanShift.toFixed(1)} days, n=${g.n}, since ${g.episodeStart}`);
+}
 
 // Universal invariants only — nothing here encodes the owner's figures, so
 // this script is safe to commit to a public repository.
