@@ -26,6 +26,11 @@ npm run predict            # uses today's date
 npm run predict -- private/measurements.json private/legacy_periods.txt 2027-06-01
 ```
 
+The report leads with a status rather than a date: `upcoming`, `N days late`, or
+`no period expected` once a prediction is more than three days past on a method
+expected to suppress bleeding. In that state no confidence percentage is shown —
+a date asserted at low confidence is less useful than naming the expectation.
+
 Prints the baseline model (what the natural cycle would do), the adapted model
 (what it is actually doing on the current method), and the per-cycle divergence
 between them. The script asserts only universal invariants — confidence within

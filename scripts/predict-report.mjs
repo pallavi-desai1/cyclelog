@@ -39,6 +39,9 @@ const episode = currentEpisode(doc, today);
 const current = currentCycle(doc, today);
 
 const show = (label, value) => console.log(`  ${label.padEnd(26)} ${value}`);
+// These strings are read aloud at a doctor's appointment; "1 days late" reads
+// as a bug in the app rather than a fact about her body.
+const days = (n) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
 console.log(`as of ${today}`);
 console.log('\nhistory');
@@ -58,21 +61,39 @@ if (baseline.available) {
   show('length', baseline.length.toFixed(2));
   show('spread (sigma)', baseline.sigma.toFixed(2));
   show('effective sample', baseline.nEff.toFixed(1));
+  // The ghost is never "late" — a cycle that was never going to happen cannot
+  // be overdue. It reports where the natural rhythm would have put a period.
+  if (baseline.status === 'passed') {
+    show('would have started', `${baseline.previousDate} (${days(baseline.daysLate)} ago)`);
+  }
   show('next date', `${baseline.date} - ${baseline.confidence}% confident`);
 } else {
   show('unavailable', baseline.reason);
 }
 
 console.log('\nadapted (what it is actually doing)');
-if (adapted.available) {
+if (!adapted.available) {
+  show('unavailable', adapted.reason);
+} else if (adapted.status === 'not-expected') {
+  // No confidence percentage here, deliberately (spec 6.2b). A date asserted at
+  // low confidence is less useful than naming the expectation; printing both
+  // would re-create the problem this state exists to solve.
+  show('status', 'NO PERIOD EXPECTED');
+  show('if one comes', `most likely around ${adapted.date}`);
+  show('days since due', days(adapted.daysLate));
+  show('spread (sigma)', adapted.sigma.toFixed(2));
+} else {
+  // An overdue period leads, because it is the more actionable fact. The report
+  // does not yet distinguish how FAR past the grace window a non-suppressing
+  // method is beyond the day count itself — deliberately deferred to the app
+  // plan rather than overlooked.
+  if (adapted.status === 'late') show('status', `${days(adapted.daysLate).toUpperCase()} LATE`);
   show('model', adapted.model);
   show('episode weight (w)', adapted.weight.toFixed(3));
   show('length', adapted.length.toFixed(2));
   show('spread (sigma)', adapted.sigma.toFixed(2));
   show('effective sample', adapted.nEff.toFixed(1));
   show('next date', `${adapted.date} - ${adapted.confidence}% confident`);
-} else {
-  show('unavailable', adapted.reason);
 }
 
 console.log('\ndivergence (actual minus baseline, per cycle on a method)');
@@ -100,6 +121,14 @@ const checkModel = (name, model) => {
   for (const [key, value] of Object.entries(model)) {
     if (Number.isNaN(value)) problems.push(`${name}: ${key} is NaN`);
   }
+  // Universal invariants: no figure of the owner's appears here. The baseline
+  // and adapted models use different vocabularies on purpose.
+  const allowed = name === 'baseline'
+    ? ['upcoming', 'passed']
+    : ['upcoming', 'late', 'not-expected'];
+  if (!allowed.includes(model.status)) problems.push(`${name}: status ${model.status} not one of ${allowed.join('/')}`);
+  if (model.status === 'late' && !(model.daysLate > 0)) problems.push(`${name}: late without a positive day count`);
+  if (model.status === 'upcoming' && model.daysLate !== null) problems.push(`${name}: upcoming with a day count`);
 };
 checkModel('baseline', baseline);
 checkModel('adapted', adapted);
