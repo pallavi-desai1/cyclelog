@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  TAU, lastPeriodStart, projectForward, baselineModel, adaptedModel, predict,
+  TAU, LATE_GRACE_DAYS, lastPeriodStart, projectForward, projectPrevious,
+  predictionStatus, baselineModel, adaptedModel, predict,
 } from '../src/predict.js';
 import { describeLengths } from '../src/stats.js';
 import { lastPeriodStartOnOrBefore } from '../src/episodes.js';
@@ -386,5 +387,178 @@ describe('predict', () => {
 
   it('is deterministic across repeated calls', () => {
     expect(predict(regularCycles, d, '2016-02-01')).toEqual(predict(regularCycles, d, '2016-02-01'));
+  });
+});
+
+describe('projectPrevious', () => {
+  it('returns the most recent projection strictly before today', () => {
+    expect(projectPrevious('2015-01-01', 28, '2015-02-10')).toBe('2015-01-29');
+  });
+
+  it('returns null when the first projection is still ahead', () => {
+    expect(projectPrevious('2015-01-01', 28, '2015-01-15')).toBeNull();
+  });
+
+  it('returns null when the first projection is exactly today', () => {
+    // `date` owns today; `previousDate` is strictly in the past.
+    expect(projectPrevious('2015-01-01', 28, '2015-01-29')).toBeNull();
+  });
+
+  it('multiplies before rounding, like projectForward', () => {
+    // Measured: at a length of 28.5 multiplying gives 2015-04-25, while stepping
+    // a pre-rounded 29 gives 2015-04-27. Two days apart by the fourth cycle.
+    expect(projectPrevious('2015-01-01', 28.5, '2015-05-01')).toBe('2015-04-25');
+  });
+
+  it('returns null for a non-positive or non-finite length', () => {
+    expect(projectPrevious('2015-01-01', 0, '2015-06-01')).toBeNull();
+    expect(projectPrevious('2015-01-01', NaN, '2015-06-01')).toBeNull();
+  });
+
+  it('returns null for a missing anchor', () => {
+    expect(projectPrevious(null, 28, '2015-06-01')).toBeNull();
+  });
+
+  it('gives up at the step cap rather than looping', () => {
+    // 2015-06-01, not a 2020s date: the privacy guard flags 2018-2026 in tracked
+    // content. Three one-day steps from the anchor reach 2015-01-04, so any later
+    // today exhausts the cap and returns null — the property under test is
+    // unchanged.
+    expect(projectPrevious('2015-01-01', 1, '2015-06-01', 3)).toBeNull();
+  });
+});
+
+describe('predictionStatus', () => {
+  it('exposes a grace window of three days', () => {
+    expect(LATE_GRACE_DAYS).toBe(3);
+  });
+
+  it('is upcoming when nothing has passed', () => {
+    expect(predictionStatus(null, '2015-02-01', true)).toEqual({ status: 'upcoming', daysLate: null });
+  });
+
+  it('is upcoming when the passed date is today', () => {
+    expect(predictionStatus('2015-02-01', '2015-02-01', true)).toEqual({ status: 'upcoming', daysLate: null });
+  });
+
+  it('is late one day past', () => {
+    expect(predictionStatus('2015-02-01', '2015-02-02', true)).toEqual({ status: 'late', daysLate: 1 });
+  });
+
+  // Review Focus 2: the boundary. Exactly 3 is late, exactly 4 is not-expected.
+  // A `< 3` mutation would make day 3 not-expected and pass a looser test.
+  it('is still late at exactly three days past', () => {
+    expect(predictionStatus('2015-02-01', '2015-02-04', true)).toEqual({ status: 'late', daysLate: 3 });
+  });
+
+  it('becomes not-expected at four days past on a suppressing method', () => {
+    expect(predictionStatus('2015-02-01', '2015-02-05', true)).toEqual({ status: 'not-expected', daysLate: 4 });
+  });
+
+  it('keeps counting late past the window when the method does not suppress', () => {
+    expect(predictionStatus('2015-02-01', '2015-03-01', false)).toEqual({ status: 'late', daysLate: 28 });
+  });
+
+  // daysLate stays populated in not-expected: "no period in 63 days" is
+  // clinically relevant even when the card does not lead with it.
+  it('keeps the day count in the not-expected state', () => {
+    expect(predictionStatus('2015-02-01', '2015-04-05', true).daysLate).toBe(63);
+  });
+});
+
+describe('model status fields', () => {
+  const suppressDoc = doc({
+    spans: [span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08')],
+    birthControl: [episode('implant', '2016-01-01', null, 'suppress')],
+  });
+
+  // Review Focus 1: `date` is always ahead, `previousDate` always behind.
+  // Lateness cannot be derived from `date`, which is why both exist.
+  it('never reports a date in the past, and a previousDate that is not', () => {
+    const today = '2016-02-20';
+    const { adapted } = predict(regularCycles, suppressDoc, today);
+    expect(adapted.date >= today).toBe(true);
+    expect(adapted.previousDate < today).toBe(true);
+  });
+
+  it('reports the adapted model late inside the grace window', () => {
+    // last period 2016-01-05, length 28 -> due 2016-02-02; two days past it
+    const { adapted } = predict(regularCycles, suppressDoc, '2016-02-04');
+    expect(adapted.status).toBe('late');
+    expect(adapted.daysLate).toBe(2);
+  });
+
+  it('reports the adapted model not-expected past the window on an implant', () => {
+    const { adapted } = predict(regularCycles, suppressDoc, '2016-02-20');
+    expect(adapted.status).toBe('not-expected');
+    expect(adapted.daysLate).toBe(18);
+  });
+
+  // Review Focus 3: the episode must be read at today, not at the cycle's start.
+  // Here the method starts AFTER the last period, so a status computed from the
+  // episode at the period's start would see no method and report `late`.
+  it('reads the suppressing method in force today, not at the cycle start', () => {
+    const startedAfter = doc({
+      spans: [span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08')],
+      birthControl: [episode('implant', '2016-01-20', null, 'suppress')],
+    });
+    expect(predict(regularCycles, startedAfter, '2016-02-20').adapted.status).toBe('not-expected');
+  });
+
+  it('keeps counting late on a non-suppressing method', () => {
+    const pill = doc({
+      spans: [span('2015-12-01', '2015-12-04'), span('2016-01-05', '2016-01-08')],
+      birthControl: [episode('pill', '2016-01-01', null, 'regulate')],
+    });
+    expect(predict(regularCycles, pill, '2016-02-20').adapted.status).toBe('late');
+  });
+
+  // The baseline is a counterfactual: it can pass, but it can never be late and
+  // is never "not expected".
+  it('uses passed, not late, for the baseline', () => {
+    const { baseline } = predict(regularCycles, suppressDoc, '2016-02-20');
+    expect(['upcoming', 'passed']).toContain(baseline.status);
+    expect(baseline.status).toBe('passed');
+  });
+
+  // Asserts positively, not `not.toBe('not-expected')` — that form passes
+  // trivially while the field is still undefined, so it proves nothing until
+  // after the implementation exists. At this date the baseline's last
+  // projection (2016-05-19) is 13 days past, which is beyond the grace window;
+  // a baseline wired with suppression would therefore say 'not-expected' here,
+  // and this says 'passed'.
+  it('calls the baseline passed, never not-expected, past the grace window', () => {
+    const { baseline } = predict(regularCycles, suppressDoc, '2016-06-01');
+    expect(baseline.status).toBe('passed');
+    expect(baseline.daysLate).toBe(13);
+  });
+
+  // Review Focus 4: a new user has nothing behind her.
+  it('is upcoming with no passed projection', () => {
+    const fresh = doc({
+      spans: [span('2016-01-05', '2016-01-08')],
+      birthControl: [episode('implant', '2016-01-01', null, 'suppress')],
+    });
+    const { adapted } = predict(regularCycles, fresh, '2016-01-10');
+    expect(adapted.status).toBe('upcoming');
+    expect(adapted.previousDate).toBeNull();
+    expect(adapted.daysLate).toBeNull();
+  });
+
+  it('leaves the status null on an unavailable prediction', () => {
+    const { baseline } = predict([], suppressDoc, '2016-02-20');
+    expect(baseline.available).toBe(false);
+    expect(baseline.status).toBeNull();
+    expect(baseline.previousDate).toBeNull();
+    expect(baseline.daysLate).toBeNull();
+  });
+
+  it('never returns NaN in any status field', () => {
+    for (const today of ['2016-01-10', '2016-02-04', '2016-02-20', '2017-06-01']) {
+      const { baseline, adapted } = predict(regularCycles, suppressDoc, today);
+      for (const model of [baseline, adapted]) {
+        for (const value of Object.values(model)) expect(Number.isNaN(value)).toBe(false);
+      }
+    }
   });
 });

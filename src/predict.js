@@ -1,4 +1,4 @@
-import { addDays } from './dates.js';
+import { addDays, diffDays } from './dates.js';
 import { cycleWeight, weightedMedian, weightedSd, effectiveN } from './weighted.js';
 import { confidencePercent } from './confidence.js';
 import { baselineCycles, episodeCycles, currentEpisode, sigmaForEffect } from './episodes.js';
@@ -12,6 +12,12 @@ export const TAU = 3;
 // this is far above any real use while still terminating on bad input.
 export const MAX_PROJECTIONS = 2000;
 
+// A period is "late" for three days; past that, on a method expected to suppress
+// bleeding, "no period expected" is the better explanation than lateness. A flat
+// constant rather than a multiple of sigma — chosen for legibility, and it
+// happens to sit near one standard deviation of the owner's baseline.
+export const LATE_GRACE_DAYS = 3;
+
 const unavailable = (model, reason) => ({
   available: false,
   model,
@@ -22,6 +28,9 @@ const unavailable = (model, reason) => ({
   nEff: 0,
   anchor: null,
   weight: null,
+  previousDate: null,
+  status: null,
+  daysLate: null,
   reason,
 });
 
@@ -43,6 +52,34 @@ export function projectForward(anchorISO, lengthDays, todayISO, maxSteps = MAX_P
     if (date >= todayISO) return date;
   }
   return null;
+}
+
+// The most recent projection strictly before today, or null if none has passed.
+// `projectForward` returns the first projection on or AFTER today, so `date` can
+// never be overdue — lateness needs its own lookup rather than being derived.
+export function projectPrevious(anchorISO, lengthDays, todayISO, maxSteps = MAX_PROJECTIONS) {
+  if (!anchorISO) return null;
+  if (!Number.isFinite(lengthDays) || !(lengthDays > 0)) return null;
+
+  let previous = null;
+  for (let n = 1; n <= maxSteps; n += 1) {
+    const date = addDays(anchorISO, Math.round(lengthDays * n));
+    if (date >= todayISO) return previous;
+    previous = date;
+  }
+  return null;
+}
+
+// `suppressing` is whether the method in force TODAY is expected to suppress
+// bleeding. Read at today, not at the cycle's start: a method begun mid-cycle
+// would otherwise report "late" forever.
+export function predictionStatus(previousDate, todayISO, suppressing) {
+  if (!previousDate) return { status: 'upcoming', daysLate: null };
+  const daysLate = diffDays(previousDate, todayISO);
+  if (daysLate <= 0) return { status: 'upcoming', daysLate: null };
+  if (daysLate <= LATE_GRACE_DAYS) return { status: 'late', daysLate };
+  // Past the window, only a suppressing method makes absence the expectation.
+  return { status: suppressing ? 'not-expected' : 'late', daysLate };
 }
 
 export function baselineModel(cycles, doc, todayISO) {
@@ -85,6 +122,13 @@ export function baselineModel(cycles, doc, todayISO) {
     return unavailable('baseline', 'projection exceeded the step cap without reaching today');
   }
 
+  // `suppressing` is always false here: nothing hypothetical can be "not
+  // expected". A counterfactual cycle can only be upcoming or already passed,
+  // so `late` is relabelled — calling the ghost "late" would imply the owner is
+  // late when the statement is about a cycle that was never going to happen.
+  const previousDate = projectPrevious(anchor, length, todayISO);
+  const counterfactual = predictionStatus(previousDate, todayISO, false);
+
   return {
     available: true,
     model: 'baseline',
@@ -95,6 +139,9 @@ export function baselineModel(cycles, doc, todayISO) {
     nEff,
     anchor,
     weight: null,
+    previousDate,
+    status: counterfactual.status === 'late' ? 'passed' : counterfactual.status,
+    daysLate: counterfactual.daysLate,
     reason: null,
   };
 }
@@ -112,12 +159,20 @@ export function adaptedModel(cycles, doc, todayISO) {
     if (noEpisodeDate === null) {
       return unavailable('no-episode', 'projection exceeded the step cap without reaching today');
     }
+    // Re-anchored, so the baseline's own previousDate no longer applies. No
+    // method is in force, so absence is never "expected" — a period overdue off
+    // birth control is simply late, and keeps counting.
+    const nePrevious = projectPrevious(anchor, base.length, todayISO);
+    const neStatus = predictionStatus(nePrevious, todayISO, false);
     return {
       ...base,
       model: 'no-episode',
       anchor,
       date: noEpisodeDate,
       weight: 0,
+      previousDate: nePrevious,
+      status: neStatus.status,
+      daysLate: neStatus.daysLate,
     };
   }
 
@@ -176,6 +231,14 @@ export function adaptedModel(cycles, doc, todayISO) {
     return unavailable('adapted', 'projection exceeded the step cap without reaching today');
   }
 
+  // The episode is the one in force TODAY, resolved at the top of this function
+  // by `currentEpisode(doc, todayISO)` — not the episode at the cycle's start.
+  // A method begun mid-cycle would otherwise report "late" indefinitely.
+  const previousDate = projectPrevious(anchor, length, todayISO);
+  const { status, daysLate } = predictionStatus(
+    previousDate, todayISO, episode.expectedEffect === 'suppress',
+  );
+
   return {
     available: true,
     model: 'adapted',
@@ -186,6 +249,9 @@ export function adaptedModel(cycles, doc, todayISO) {
     nEff,
     anchor,
     weight: w,
+    previousDate,
+    status,
+    daysLate,
     reason: null,
   };
 }
