@@ -82,9 +82,12 @@ describe('usableCycles', () => {
 });
 
 describe('baselineCycles', () => {
+  // nextStart on the pre-episode cycles matters now: the whole cycle, not just
+  // its start, must precede the first episode -- see baselineCycles' own
+  // comment in src/episodes.js.
   const cycles = [
-    cycle('2015-01-01', 28),
-    cycle('2015-02-01', 30),
+    cycle('2015-01-01', 28, { nextStart: '2015-02-01' }),
+    cycle('2015-02-01', 30, { nextStart: '2015-03-03' }),
     cycle('2016-07-01', 40), // during the implant episode
   ];
 
