@@ -27,6 +27,8 @@ const PRECACHE = [
   'src/summary.js',
   'src/importers/clue.js',
   'src/importers/legacy.js',
+  'src/import.js',
+  'src/ui/render.js',
   'icons/icon-180.png',
   'icons/icon-192.png',
   'icons/icon-512.png',
