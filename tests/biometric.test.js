@@ -62,6 +62,11 @@ describe('prfSalt', () => {
   it('is a fixed label, so the same face yields the same key forever', () => {
     expect([...prfSalt()]).toEqual([...new TextEncoder().encode(PRF_SALT_LABEL)]);
   });
+
+  it('pins the literal salt to cyclelog-vault-key-v1 so a changed label does not silently lock the vault', () => {
+    expect(PRF_SALT_LABEL).toBe('cyclelog-vault-key-v1');
+    expect([...prfSalt()]).toEqual([...new TextEncoder().encode('cyclelog-vault-key-v1')]);
+  });
 });
 
 describe('enrollBiometric', () => {
