@@ -22,7 +22,30 @@
   <p id="lock-error" role="alert"></p>
 </main>
 
-<main id="app" class="screen" hidden></main>
+<main id="setup" class="screen" hidden>
+  <h1>CycleLog</h1>
+  <p>Set a passphrase. It never leaves this phone, and it cannot be recovered —
+     if you forget it, the data is gone.</p>
+  <input id="setup-passphrase" type="password" autocomplete="new-password"
+         autocapitalize="off" spellcheck="false">
+  <input id="setup-confirm" type="password" autocomplete="new-password"
+         autocapitalize="off" spellcheck="false">
+
+  <p>Optional: import your history.</p>
+  <label for="clue-file">Clue export (measurements.json)</label>
+  <input id="clue-file" type="file" accept=".json,application/json">
+  <label for="legacy-file">Earlier log (.txt)</label>
+  <input id="legacy-file" type="file" accept=".txt,text/plain">
+
+  <button id="create" type="button">Create my vault</button>
+  <p id="setup-progress" role="status"></p>
+  <p id="setup-error" role="alert"></p>
+</main>
+
+<main id="app" class="screen" hidden>
+  <div id="summary"></div>
+  <button id="lock-now" type="button">Lock</button>
+</main>
 
 <script type="module" src="src/ui/app.js"></script>
 </body>
