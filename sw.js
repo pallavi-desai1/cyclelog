@@ -24,6 +24,7 @@ const PRECACHE = [
   'src/spans.js',
   'src/weighted.js',
   'src/stats.js',
+  'src/summary.js',
   'src/importers/clue.js',
   'src/importers/legacy.js',
   'icons/icon-180.png',
