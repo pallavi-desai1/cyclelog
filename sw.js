@@ -30,6 +30,7 @@ const PRECACHE = [
   'src/importers/clue.js',
   'src/importers/legacy.js',
   'src/import.js',
+  'src/edit.js',
   'src/ui/render.js',
   'src/today.js',
   'icons/icon-180.png',
