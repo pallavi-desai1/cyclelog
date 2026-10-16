@@ -301,8 +301,12 @@ input { font-family: var(--font-body); }
    states additionally carries a shape — a dot, a ring, an underline, an
    outline — so none of it depends on hue alone. */
 /* Her words: white for where the period would have been. A hollow cell
-   against the filled real ones, ringed in dashed lavender. */
-.cal-baseline { background: #FFFFFF; }
+   against the filled real ones, ringed in dashed lavender.
+   Scoped with :not(.cal-period) so it never repaints a day that actually
+   bled: on such a day the fill stays, the dashed ring is added, and both
+   facts show. Unscoped, it also put the dark ink of .cal-period onto a
+   near-black cell in dark mode, which is how a date number vanished. */
+.cal-baseline:not(.cal-period) { background: #FFFFFF; }
 
 .cal-pms { box-shadow: inset 0 -4px 0 var(--warning); }
 
@@ -340,5 +344,5 @@ input { font-family: var(--font-body); }
 
 @media (prefers-color-scheme: dark) {
   /* The ghost stays hollow rather than literally white, which would glare. */
-  .cal-baseline { background: var(--surface); }
+  .cal-baseline:not(.cal-period) { background: var(--surface); }
 }

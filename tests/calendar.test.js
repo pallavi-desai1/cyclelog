@@ -221,7 +221,20 @@ describe('projectedDates — the counterfactual cadence', () => {
   it('returns the ghost dates that fall inside a window', () => {
     // 28-day cadence anchored on 1 January.
     expect(projectedDates('2015-01-01', 28, '2015-01-01', '2015-03-31'))
-      .toEqual(['2015-01-01', '2015-01-29', '2015-02-26', '2015-03-26']);
+      .toEqual(['2015-01-29', '2015-02-26', '2015-03-26']);
+  });
+
+  // The anchor is a period that actually happened. Marking it as a
+  // counterfactual claims a prediction where there is an observation — and
+  // on the calendar it drew a ghost on a day she really bled.
+  it('never marks the anchor itself', () => {
+    expect(projectedDates('2015-01-01', 28, '2015-01-01', '2015-03-31'))
+      .not.toContain('2015-01-01');
+  });
+
+  it('starts one whole cycle after the anchor', () => {
+    expect(projectedDates('2015-01-01', 28, '2015-01-01', '2015-12-31')[0])
+      .toBe('2015-01-29');
   });
 
   it('includes a date on either boundary', () => {
@@ -243,14 +256,15 @@ describe('projectedDates — the counterfactual cadence', () => {
   it('multiplies before rounding, so it does not drift over years', () => {
     const dates = projectedDates('2015-01-01', 28.4, '2015-01-01', '2017-12-31');
     const accumulated = [];
-    let walk = '2015-01-01';
+    let walk = addDays('2015-01-01', Math.round(28.4));
     for (let i = 0; i < dates.length; i++) {
       accumulated.push(walk);
       walk = addDays(walk, Math.round(28.4));
     }
     expect(dates[dates.length - 1]).not.toBe(accumulated[accumulated.length - 1]);
-    // 39 cycles of 28.4 days from 1 Jan 2015 lands on day round(38 * 28.4).
-    expect(dates[38]).toBe(addDays('2015-01-01', Math.round(38 * 28.4)));
+    // The 38th occurrence sits at round(38 * 28.4) days from the anchor,
+    // not at 38 additions of round(28.4).
+    expect(dates[37]).toBe(addDays('2015-01-01', Math.round(38 * 28.4)));
   });
 
   it('refuses a length that is not a positive number', () => {

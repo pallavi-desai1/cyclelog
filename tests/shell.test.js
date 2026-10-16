@@ -475,3 +475,20 @@ describe('legend swatches', () => {
     expect(value('--flow-medium')).not.toBe(value('--flow-heavy-fill'));
   });
 });
+
+describe('a day that both bled and was a ghost', () => {
+  // The counterfactual fill must never repaint a day that actually bled: the
+  // fill is the observation, the dashed ring is the comparison, and both
+  // belong on the cell. Unscoped, the ghost's background also put the dark
+  // .cal-period ink onto a near-black cell in dark mode, and the date
+  // number disappeared.
+  it('scopes the ghost fill away from bleeding days', () => {
+    const text = cssRules();
+    expect(text).toMatch(/\.cal-baseline:not\(\.cal-period\)\s*\{[^}]*background/);
+    expect(text).not.toMatch(/(^|[\s,}])\.cal-baseline\s*\{[^}]*background/);
+  });
+
+  it('keeps the dashed ring on such a day', () => {
+    expect(ruleBody('.cal-baseline')).toMatch(/dashed/);
+  });
+});

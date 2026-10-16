@@ -34,6 +34,10 @@ export function monthLabel(month) {
 // what lets the calendar answer "when would my period have been" for any
 // month, not just the next one.
 //
+// Counting starts at n = 1, one full cycle after the anchor: the anchor is a
+// period that actually happened, so marking it as a counterfactual would
+// claim a prediction where there is an observation.
+//
 // The offset is `round(length * n)` — multiplied first, rounded once. Adding
 // a rounded step per cycle accumulates error: at 28.4 days that is a
 // fortnight adrift over three years, and this exact bug has been found twice
@@ -43,7 +47,7 @@ export function projectedDates(anchorISO, lengthDays, fromISO, toISO) {
   if (!Number.isFinite(lengthDays) || !(lengthDays > 0)) return [];
 
   const dates = [];
-  for (let n = 0; n < MAX_PROJECTED; n += 1) {
+  for (let n = 1; n <= MAX_PROJECTED; n += 1) {
     const date = addDays(anchorISO, Math.round(lengthDays * n));
     if (date > toISO) break;
     if (date >= fromISO) dates.push(date);
