@@ -33,6 +33,24 @@ export function documentFromSources({ clueJson = null, legacyText = null } = {})
   return { doc: { ...doc, version: DOCUMENT_VERSION }, warnings, conflicts };
 }
 
+const plural = (n, word) => `${n} ${n === 1 ? word : `${word}s`}`;
+
+// What setup shows after an import: counts and a date range, derived from the
+// document that was actually built, never hardcoded. The counts are the
+// owner's, which is why nothing here is a fixed string or a stored number.
+export function describeImport({ doc, warnings }) {
+  const allDates = [
+    ...doc.spans.flatMap(span => [span.start, span.end].filter(Boolean)),
+    ...Object.keys(doc.days),
+  ].sort();
+  const range = allDates.length > 0 ? `, ${allDates[0]} to ${allDates[allDates.length - 1]}` : '';
+  const warningText = warnings.length > 0
+    ? ` ${plural(warnings.length, 'line')} could not be read.`
+    : '';
+  return `Imported ${plural(doc.spans.length, 'period')} and `
+    + `${plural(Object.keys(doc.days).length, 'logged day')}${range}.${warningText}`;
+}
+
 export function serializeDocument(doc) {
   return JSON.stringify(doc);
 }

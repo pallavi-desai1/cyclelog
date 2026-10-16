@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DOCUMENT_VERSION, emptyDocument, documentFromSources,
-  serializeDocument, parseDocument,
+  serializeDocument, parseDocument, describeImport,
 } from '../src/import.js';
 
 const clue = [
@@ -60,6 +60,51 @@ describe('documentFromSources', () => {
 
   it('refuses to build a document from nothing, rather than silently erasing', () => {
     expect(() => documentFromSources({})).toThrow(/no sources/);
+  });
+});
+
+describe('describeImport', () => {
+  const twoSpanDoc = {
+    version: 1,
+    spans: [
+      { start: '2015-01-01', end: '2015-01-05' },
+      { start: '2015-03-01', end: null },
+    ],
+    days: { '2015-01-01': {}, '2015-01-02': {}, '2015-01-03': {} },
+    gaps: [],
+    birthControl: [],
+  };
+
+  it('derives counts and the date range from the document rather than a fixed string', () => {
+    const message = describeImport({ doc: twoSpanDoc, warnings: [] });
+    expect(message).toBe('Imported 2 periods and 3 logged days, 2015-01-01 to 2015-03-01.');
+  });
+
+  it('pluralizes a single period and a single logged day', () => {
+    const single = { ...twoSpanDoc, spans: [{ start: '2015-01-01', end: null }], days: { '2015-01-01': {} } };
+    expect(describeImport({ doc: single, warnings: [] }))
+      .toBe('Imported 1 period and 1 logged day, 2015-01-01 to 2015-01-01.');
+  });
+
+  it('names unreadable lines when warnings were produced, singular and plural', () => {
+    expect(describeImport({ doc: twoSpanDoc, warnings: ['one bad line'] }))
+      .toMatch(/1 line could not be read\.$/);
+    expect(describeImport({ doc: twoSpanDoc, warnings: ['a', 'b', 'c'] }))
+      .toMatch(/3 lines could not be read\.$/);
+  });
+
+  it('says nothing about a range when the document is empty', () => {
+    expect(describeImport({ doc: emptyDocument(), warnings: [] }))
+      .toBe('Imported 0 periods and 0 logged days.');
+  });
+
+  it('matches a real import end to end, counts included, warning included', () => {
+    const noisy = [{ type: 'weather', date: '2016-01-02', value: null, id: 'w' }, ...clue];
+    const imported = documentFromSources({ clueJson: noisy, legacyText: legacy });
+    const message = describeImport(imported);
+    expect(message).toContain(`Imported ${imported.doc.spans.length} `);
+    expect(message).toContain(`${Object.keys(imported.doc.days).length} logged`);
+    expect(message).toMatch(/1 line could not be read\.$/);
   });
 });
 

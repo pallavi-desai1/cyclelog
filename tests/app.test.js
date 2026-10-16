@@ -168,6 +168,74 @@ describe('idle locking', () => {
   });
 });
 
+describe('setup robustness', () => {
+  it('isolates a Face ID enrolment failure from the setup result', () => {
+    // Before this fix, offerFaceId() had no catch of its own: a throw from
+    // rememberCredentialId or enrollWrapping (both touch IndexedDB) would
+    // propagate into create()'s outer catch and report a vault that was
+    // already created and written as a failed setup.
+    const text = app();
+    const body = functionBody(text, 'offerFaceId');
+    expect(body, 'offerFaceId').not.toBeNull();
+    expect(body).toMatch(/\bcatch\b/);
+  });
+
+  it('runs paint() unconditionally after offering Face ID, passing the import note through', () => {
+    // Before this fix, create() called `paint();` with no argument, and a
+    // throw inside offerFaceId (now caught there, but the ordering itself
+    // matters) would have skipped paint() entirely, leaving the setup screen
+    // up over an already-created vault.
+    const body = functionBody(app(), 'create');
+    expect(body).toMatch(/await offerFaceId\(\);\s*(\/\/[^\n]*\n\s*)*paint\(importNote\);/);
+  });
+
+  it('shows the Face ID button immediately on successful enrolment, not only on next start()', () => {
+    const body = functionBody(app(), 'offerFaceId');
+    expect(body).toContain("show('faceid')");
+  });
+
+  it('disables "Create my vault" for the duration of create(), re-enabling in a finally', () => {
+    // Two concurrent create() runs each mint their own data key; whichever
+    // writeMeta lands second can seal the stored blob with a key the stored
+    // meta does not wrap, leaving the vault permanently unopenable. Guard: a
+    // second click while disabled must be a no-op, and `disabled` must
+    // return to false even on failure.
+    const body = functionBody(app(), 'create');
+    expect(body).toMatch(/if \(el\('create'\)\.disabled\) return;/);
+    expect(body).toMatch(/el\('create'\)\.disabled = true;/);
+    expect(body).toMatch(/finally\s*\{[\s\S]*el\('create'\)\.disabled = false;[\s\S]*\}/);
+  });
+
+  it('disables "Unlock" for the duration of unlock(), re-enabling in a finally', () => {
+    const body = functionBody(app(), 'unlock');
+    expect(body).toMatch(/if \(el\('unlock'\)\.disabled\) return;/);
+    expect(body).toMatch(/el\('unlock'\)\.disabled = true;/);
+    expect(body).toMatch(/finally\s*\{[\s\S]*el\('unlock'\)\.disabled = false;[\s\S]*\}/);
+  });
+
+  it('reports what was imported instead of discarding warnings and counts', () => {
+    // documentFromSources returns { doc, warnings, conflicts }; before this
+    // fix create() destructured only .doc, so a dropped period or an
+    // unparsed legacy line was invisible, with no way to fix it from inside
+    // the app (import only runs during first-run setup). describeImport (in
+    // src/import.js, tested directly in tests/import.test.js) computes the
+    // message; this only pins that create() actually calls it rather than
+    // discarding .warnings the way it used to.
+    const text = app();
+    expect(text).toContain('describeImport(');
+    expect(text).not.toMatch(/documentFromSources\([^)]*\)\.doc\b/);
+  });
+
+  it('requires an explicit second press before creating an empty vault', () => {
+    // No file chosen used to fall straight through to emptyDocument() with
+    // no confirmation, so a mis-tap silently produced a vault with no
+    // history and nothing on screen saying so.
+    const text = app();
+    expect(text).toContain('awaitingEmptyConfirm');
+    expect(text).toMatch(/No files chosen\. Press Create again/);
+  });
+});
+
 describe('precache', () => {
   it('lists every module the app now imports', () => {
     for (const module of [
