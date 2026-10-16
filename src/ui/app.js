@@ -109,10 +109,33 @@ let editSession = 0;
 // pending.
 let saveInFlight = false;
 
-function paint(note = '') {
+// The in-flight vault.save() promise, held so paint() can wait for it. An
+// unlock arriving while a save is still landing would otherwise read
+// vault.read() before the write does — backgrounded, IndexedDB work can be
+// suspended for as long as she is away — leaving memory on the pre-save
+// document while the vault ends up with the saved one; her next save would
+// then compute from that stale base and silently overwrite the earlier edit.
+let pendingSave = null;
+
+// The date of a save that failed on a path with nowhere left to show its
+// own message — the form (and #edit-error with it) was already gone by the
+// time the rejection arrived, typically because the vault locked first.
+// Memory only, never persisted, and surfaced once, the next time paint()
+// runs.
+let unsavedWarning = null;
+
+async function paint(note = '') {
+  // See pendingSave above. Ignoring a rejection here is deliberate: a save
+  // that failed is unsavedWarning's problem to surface, not a reason to
+  // block getting back into the app.
+  await pendingSave?.catch(() => {});
   openDoc = parseDocument(vault.read());
   openSummary = buildSummary(openDoc, localToday());
   el('summary').innerHTML = renderSummary(openSummary);
+  if (unsavedWarning !== null) {
+    note = `Your last entry may not have saved — please check ${unsavedWarning}.`;
+    unsavedWarning = null;
+  }
   say('import-notice', note);
   viewMonth = monthOf(localToday());
   selectedDate = null;
@@ -229,6 +252,7 @@ async function saveDay() {
   const date = editing;
   const epoch = sessionEpoch;
   const session = editSession;
+  let writePromise;
   try {
     // applyDayEdit (src/edit.js) only moves the flow's span when the flow
     // actually changed — an untouched save on a day with no entry must not
@@ -237,8 +261,11 @@ async function saveDay() {
 
     // The vault is the authority. Nothing in the view adopts the new document
     // until the encrypted write has resolved, so a failed save leaves her
-    // looking at what is actually stored.
-    await vault.save(serializeDocument(next));
+    // looking at what is actually stored. pendingSave lets a paint() that
+    // starts mid-write wait for it instead of reading the pre-save document.
+    writePromise = vault.save(serializeDocument(next));
+    pendingSave = writePromise;
+    await writePromise;
 
     const outcome = saveOutcome({
       epochAtStart: epoch, epochNow: sessionEpoch, sessionAtStart: session, sessionNow: editSession,
@@ -253,10 +280,14 @@ async function saveDay() {
     // compute from a stale base and overwrite what this one just wrote.
     openDoc = next;
     openSummary = buildSummary(openDoc, localToday());
-    if (outcome === 'adopt-only') return; // a different editor is open now; leave it alone
-
+    // The card and the grid repaint on every non-abandoned outcome — a
+    // period she just recorded must not go on reading "days late" just
+    // because a different editor happened to be open when the write landed.
+    // Neither touches #day-detail, so an open draft for another day survives.
     el('summary').innerHTML = renderSummary(openSummary);
     drawCalendar();
+    if (outcome === 'adopt-only') return; // a different editor is open now; leave #day-detail alone
+
     editing = null;
     // She may have Cancelled and tapped a different day on the calendar
     // while this was saving — her panel belongs to whatever she is looking
@@ -270,13 +301,24 @@ async function saveDay() {
     const outcome = saveOutcome({
       epochAtStart: epoch, epochNow: sessionEpoch, sessionAtStart: session, sessionNow: editSession,
     });
-    if (outcome !== 'adopt-and-render') return;
+    if (outcome !== 'adopt-and-render') {
+      // Neither #edit-error (gone behind the lock screen, or belonging to a
+      // different editor now) nor anywhere else in the current view can
+      // report this failure. Remembered in memory only, surfaced once the
+      // next time paint() runs.
+      unsavedWarning = date;
+      return;
+    }
     const errorField = document.getElementById('edit-error');
     if (errorField !== null) {
       errorField.textContent = 'That did not save. Your entry is still here — try again.';
     }
   } finally {
     saveInFlight = false;
+    // Only clear the slot this call itself set — saveInFlight already
+    // forbids two saves running at once, but belt-and-braces: a stale clear
+    // from the wrong call must never erase a newer save's pendingSave.
+    if (pendingSave === writePromise) pendingSave = null;
     const saveButton = document.getElementById('edit-save');
     if (saveButton !== null) saveButton.disabled = false;
   }
@@ -350,7 +392,7 @@ async function create() {
     clear('setup-confirm');
     say('setup-progress', '');
     await offerFaceId();
-    paint(importNote);
+    await paint(importNote);
   } catch {
     // Backstop for anything above that was not already given its own
     // message: a storage failure from vault.setup, a quota error, etc.
@@ -378,11 +420,13 @@ async function unlock() {
       return say('lock-error', 'That passphrase did not open the vault.');
     }
     say('lock-error', '');
-    paint();
+    await paint();
   } catch {
     // Covers a correct passphrase against a corrupted or wrong-version
     // document: parseDocument inside paint() can throw, and without this the
-    // click clears the error line and then does nothing at all.
+    // click clears the error line and then does nothing at all. paint() is
+    // itself async now (it awaits any pendingSave first), so this await is
+    // also what keeps that throw inside this try at all.
     say('lock-error', 'Something went wrong. Please try again.');
   } finally {
     clear('passphrase');
@@ -399,7 +443,7 @@ async function faceIdUnlock() {
     const result = await vault.unlockWithKey('biometric', ceremony.key);
     if (!result.ok) return say('lock-error', 'Face ID is no longer enrolled. Use your passphrase.');
     say('lock-error', '');
-    paint();
+    await paint();
   } catch {
     say('lock-error', 'Something went wrong. Please try again.');
   }
@@ -484,6 +528,13 @@ el('day-detail').addEventListener('click', event => {
     editing = null;
     selectDay(selectedDate);
   }
+});
+// "Save or cancel this day first." (or a failed-save message) must not sit
+// there once she has resumed typing — it describes a tap or a save that
+// already happened, not whatever she is doing now.
+el('day-detail').addEventListener('input', () => {
+  const errorField = document.getElementById('edit-error');
+  if (errorField !== null) errorField.textContent = '';
 });
 el('cal-prev').addEventListener('click', () => { stepMonth(-1); });
 el('cal-next').addEventListener('click', () => { stepMonth(1); });
