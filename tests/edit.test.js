@@ -217,6 +217,42 @@ describe('setFlow — recording bleeding', () => {
     expect(spanCovering(after.spans, '2015-01-30')).not.toBeNull();
     expect(after.spans).toHaveLength(3);
   });
+
+  // 5 of her real spans start approximate and 7 end approximate — lines in
+  // the hand-written log marked "approx", "(est.)" or "midnight". An
+  // endpoint that does not move under an edit must keep its own precision.
+  it('extending forward from a span whose start is approximate keeps that start approximate', () => {
+    const approxStart = doc({
+      spans: [{ start: '2015-01-01', end: '2015-01-03', precision: 'approx', endPrecision: 'exact', source: 'legacy' }],
+    });
+    const after = setFlow(approxStart, '2015-01-04', 'light');
+    const extended = spanCovering(after.spans, '2015-01-04');
+    expect(extended.precision).toBe('approx');
+    expect(extended.endPrecision).toBe('exact');
+  });
+
+  it('extending backward into a span whose end is approximate keeps that end approximate', () => {
+    const approxEnd = doc({
+      spans: [{ start: '2015-01-05', end: '2015-01-07', precision: 'exact', endPrecision: 'approx', source: 'legacy' }],
+    });
+    const after = setFlow(approxEnd, '2015-01-04', 'light');
+    const extended = spanCovering(after.spans, '2015-01-04');
+    expect(extended.precision).toBe('exact');
+    expect(extended.endPrecision).toBe('approx');
+  });
+
+  it('a gap-closing merge keeps the first span\'s start precision and the second span\'s end precision', () => {
+    const touching = doc({
+      spans: [
+        { start: '2015-01-01', end: '2015-01-03', precision: 'approx', endPrecision: 'exact', source: 'legacy' },
+        { start: '2015-01-05', end: '2015-01-07', precision: 'exact', endPrecision: 'approx', source: 'legacy' },
+      ],
+    });
+    const after = setFlow(touching, '2015-01-04', 'light');
+    expect(after.spans).toHaveLength(1);
+    expect(after.spans[0].precision).toBe('approx');
+    expect(after.spans[0].endPrecision).toBe('approx');
+  });
 });
 
 describe('setFlow — taking bleeding back', () => {
@@ -255,6 +291,31 @@ describe('setFlow — taking bleeding back', () => {
     expect(after.spans).toHaveLength(2);
     expect(after.spans[0]).toMatchObject({ start: '2015-03-01', end: '2015-03-01' });
     expect(after.spans[1]).toMatchObject({ start: '2015-03-03', end: '2015-03-03' });
+  });
+
+  it('shrinking from the start leaves the unmoved end\'s approximate intact and makes the new start exact', () => {
+    const approxEnd = doc({
+      spans: [{ start: '2015-03-01', end: '2015-03-03', precision: 'exact', endPrecision: 'approx', source: 'manual' }],
+    });
+    const after = setFlow(approxEnd, '2015-03-01', null);
+    expect(after.spans).toHaveLength(1);
+    expect(after.spans[0]).toMatchObject({
+      start: '2015-03-02', end: '2015-03-03', precision: 'exact', endPrecision: 'approx',
+    });
+  });
+
+  it('splitting keeps the outer two precisions and makes both inner endpoints exact', () => {
+    const approxBoth = doc({
+      spans: [{ start: '2015-03-01', end: '2015-03-03', precision: 'approx', endPrecision: 'approx', source: 'manual' }],
+    });
+    const after = setFlow(approxBoth, '2015-03-02', null);
+    expect(after.spans).toHaveLength(2);
+    expect(after.spans[0]).toMatchObject({
+      start: '2015-03-01', end: '2015-03-01', precision: 'approx', endPrecision: 'exact',
+    });
+    expect(after.spans[1]).toMatchObject({
+      start: '2015-03-03', end: '2015-03-03', precision: 'exact', endPrecision: 'approx',
+    });
   });
 
   it('removes a one-day period entirely', () => {

@@ -64,6 +64,9 @@ export function setDayFields(doc, dateISO, patch) {
 }
 
 export function setApproximate(doc, dateISO, isApproximate) {
+  // Unlike setDayFields, this does not call parseISO: an impossible date
+  // with no existing day simply falls through this guard and returns the
+  // document unchanged, rather than throwing.
   if (doc.days[dateISO] === undefined) return doc;
   const day = dayAt(doc, dateISO);
   day.precision = isApproximate ? 'approx' : 'exact';
@@ -72,8 +75,14 @@ export function setApproximate(doc, dateISO, isApproximate) {
 
 const sortSpans = spans => [...spans].sort((a, b) => a.start.localeCompare(b.start));
 
-const span = (start, end) => ({
-  start, end, precision: 'exact', endPrecision: 'exact', source: EDIT_SOURCE,
+// precision/endPrecision are taken from the caller rather than assumed:
+// an endpoint that did not move keeps whatever precision it already had
+// (5 of her spans start approximate and 7 end approximate, from lines in
+// the hand-written log marked "approx", "(est.)" or "midnight" — those
+// feed APPROX_WEIGHT in src/weighted.js). Only an endpoint that is new or
+// that moved to the edited date becomes 'exact'.
+const span = (start, end, precision, endPrecision) => ({
+  start, end, precision, endPrecision, source: EDIT_SOURCE,
 });
 
 // Surgical, never a rebuild. 48 of her periods have no day entries behind
@@ -89,11 +98,18 @@ function addToSpans(spans, dateISO) {
 
   if (before && after) {
     // The day closes the gap between two periods: they were one all along.
-    return sortSpans([...others, span(before.start, after.end ?? after.start)]);
+    // Neither original endpoint moved — each keeps its own precision.
+    return sortSpans([...others, span(before.start, after.end ?? after.start, before.precision, after.endPrecision)]);
   }
-  if (before) return sortSpans([...others, span(before.start, dateISO)]);
-  if (after) return sortSpans([...others, span(dateISO, after.end ?? after.start)]);
-  return sortSpans([...others, span(dateISO, dateISO)]);
+  if (before) {
+    // before.start is unmoved; the new end is today's edit, so it's exact.
+    return sortSpans([...others, span(before.start, dateISO, before.precision, 'exact')]);
+  }
+  if (after) {
+    // The new start is today's edit, so it's exact; after's end is unmoved.
+    return sortSpans([...others, span(dateISO, after.end ?? after.start, 'exact', after.endPrecision)]);
+  }
+  return sortSpans([...others, span(dateISO, dateISO, 'exact', 'exact')]);
 }
 
 function removeFromSpans(spans, dateISO) {
@@ -105,12 +121,23 @@ function removeFromSpans(spans, dateISO) {
   const end = covering.end ?? covering.start;
 
   if (start === end) return sortSpans(others);
-  if (dateISO === start) return sortSpans([...others, span(addDays(start, 1), end)]);
-  if (dateISO === end) return sortSpans([...others, span(start, addDays(end, -1))]);
+  if (dateISO === start) {
+    // The new start moved to the day after the edit, so it's exact; the
+    // end never moved and keeps its own precision.
+    return sortSpans([...others, span(addDays(start, 1), end, 'exact', covering.endPrecision)]);
+  }
+  if (dateISO === end) {
+    // The start never moved and keeps its own precision; the new end
+    // moved to the day before the edit, so it's exact.
+    return sortSpans([...others, span(start, addDays(end, -1), covering.precision, 'exact')]);
+  }
+  // Split: the first half keeps the original start precision and gets a
+  // new, exact end; the second half gets a new, exact start and keeps
+  // the original end precision.
   return sortSpans([
     ...others,
-    span(start, addDays(dateISO, -1)),
-    span(addDays(dateISO, 1), end),
+    span(start, addDays(dateISO, -1), covering.precision, 'exact'),
+    span(addDays(dateISO, 1), end, 'exact', covering.endPrecision),
   ]);
 }
 
