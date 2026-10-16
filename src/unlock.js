@@ -12,7 +12,7 @@ export const VAULT_VERSION = 1;
 export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOCK_MS }) {
   // A random data key encrypts the document. The passphrase only wraps that
   // key, so Face ID can be a second wrapping of the same key and a passphrase
-  // change re-wraps rather than re-encrypting nine years of history.
+  // change re-wraps rather than re-encrypting years of history.
   let dataKey = null;
   let plaintext = null;
   let lastTouch = 0;

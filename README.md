@@ -109,7 +109,7 @@ and set it up again from your kept source files.
 
 Zero runtime dependencies, native ES modules, no build step. Vitest is the only
 dev dependency. Every module under `src/` is pure: data in, data out, no I/O and
-no DOM, which is what makes nine years of history testable in Node.
+no DOM, which is what makes years of history testable in Node.
 
 Dates are `YYYY-MM-DD` strings everywhere and all arithmetic goes through
 `src/dates.js`, which is UTC-based — local-time date math silently shifts logged

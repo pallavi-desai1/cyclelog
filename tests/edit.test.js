@@ -9,7 +9,7 @@ const doc = (overrides = {}) => ({
 
 const imported = () => doc({
   spans: [
-    // A legacy period with no day entries behind it — 48 of hers look like this.
+    // A legacy period with no day entries behind it — many imported periods look like this.
     { start: '2015-01-01', end: '2015-01-05', precision: 'exact', endPrecision: 'exact', source: 'legacy' },
     { start: '2015-01-29', end: '2015-02-02', precision: 'exact', endPrecision: 'exact', source: 'clue' },
   ],
@@ -212,7 +212,7 @@ describe('setFlow — recording bleeding', () => {
     expect(after.spans).toEqual(imported().spans);
   });
 
-  // Review Focus 2: the 48 periods with no day entries behind them.
+  // Review Focus 2: imported periods with no day entries behind them.
   it('leaves every other period alone, including ones with no day entries', () => {
     const after = setFlow(imported(), '2015-06-01', 'medium');
     expect(spanCovering(after.spans, '2015-01-03')).not.toBeNull();
@@ -359,7 +359,7 @@ describe('applyDayEdit', () => {
     },
   });
 
-  // Review Focus 2 / Critical 1 (final branch review): 48 of her 110 real
+  // Review Focus 2 / Critical 1 (final branch review): the imported
   // periods have no day entries behind them. Opening any of their days and
   // saving without changing anything must not move spans at all — the form
   // cannot tell "she left it alone" from "she cleared it" from the unchecked

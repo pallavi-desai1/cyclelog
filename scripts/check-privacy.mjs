@@ -11,7 +11,7 @@
 // that is the invented range used by synthetic test fixtures throughout the
 // suite (see tests/*.test.js) and would otherwise flood this check with
 // false positives.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 const REAL_RANGE = /(?:2018|2019|2020|2021|2022|2023|2024|2025|2026)-\d{2}-\d{2}/g;
@@ -124,10 +124,53 @@ for (const path of files) {
   }
 }
 
+// Dates are not the only way a public repository can describe its owner.
+// Comments explaining WHY the code is shaped as it is leaked her period
+// count, how many years she has tracked, and which contraceptive method she
+// is on — none of which is a date, and all of which is inference a reader
+// gets for free. These phrases are banned from tracked content and from
+// commit messages, which are just as public.
+const INFERENCE_PATTERNS = [
+  /\bnine years\b/i,
+  /\b\d+ of (?:her|hers|the) \d+ (?:periods|cycles)\b/i,
+  /\b\d+ of (?:her|hers)\b/i,
+  /pill-then/i,
+  /she is one of/i,
+  /her (?:implant|pill|method)\b/i,
+  /five who keep bleeding/i,
+  /\bher \d+ (?:periods|cycles|years)\b/i,
+];
+
+for (const path of files) {
+  const lines = readFileSync(path, 'utf8').split('\n');
+  for (const [i, line] of lines.entries()) {
+    for (const pattern of INFERENCE_PATTERNS) {
+      if (pattern.test(line)) {
+        hits += 1;
+        console.log(`${path}:${i + 1} INFERS HER SITUATION (${pattern})`);
+        break;
+      }
+    }
+  }
+}
+
+// Commit messages travel with the code and are read by anyone who clones it.
+const messages = execSync('git log --format=%s%n%b', { encoding: 'utf8' }).split('\n');
+for (const [i, line] of messages.entries()) {
+  for (const pattern of INFERENCE_PATTERNS) {
+    if (pattern.test(line)) {
+      hits += 1;
+      console.log(`commit log line ${i + 1} INFERS HER SITUATION (${pattern}): ${line.trim().slice(0, 60)}`);
+      break;
+    }
+  }
+}
+
 if (hits > 0) {
-  console.log(`\n${hits} potential real-date hit(s) found outside docs/.`);
+  console.log(`\n${hits} privacy hit(s) found. Nothing in a public repository may`);
+  console.log('describe her dates, her counts, or her method — not in code, not in a commit.');
   process.exit(1);
 }
 
-console.log('No real-range dates found in tracked content outside docs/.');
+console.log('No real dates and no inference about her in tracked content or commit messages.');
 process.exit(0);

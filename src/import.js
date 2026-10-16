@@ -58,7 +58,7 @@ export function serializeDocument(doc) {
 export function parseDocument(text) {
   const doc = JSON.parse(text);
   // A document from the future would be read with the wrong meaning. Refuse
-  // loudly: nine years of history is not something to guess at.
+  // loudly: years of history is not something to guess at.
   if (doc.version !== DOCUMENT_VERSION) {
     throw new Error(`unsupported document version ${doc.version}`);
   }

@@ -37,7 +37,7 @@ export function divergenceSeries(doc, baseline) {
     // Numbering restarts within each episode, and each episode projects from the
     // last period start before it began. Numbering straight through a gap of
     // natural cycling would pair a post-break period against a projection that
-    // ignores the elapsed months — on a pill-then-gap-then-implant history that
+    // ignores the elapsed months — on a history spanning several methods that
     // produced a divergence of -177 days, projecting a period from an anchor
     // months after it.
     const n = (ordinals.get(entry.episodeStart) ?? 0) + 1;
@@ -91,7 +91,7 @@ export function meanShift(series) {
 }
 
 // Spec 6.5 asks for the mean shift broken out by episode. One blended figure
-// across a pill-then-implant history describes neither method.
+// across a history spanning two methods describes neither of them.
 export function meanShiftByEpisode(series) {
   const groups = new Map();
   for (const point of series ?? []) {

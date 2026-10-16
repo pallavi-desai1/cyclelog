@@ -152,7 +152,7 @@ async function paint(note = '') {
   screen('app');
 }
 
-// Where her period would have fallen in THIS month, not merely the next one
+// Where a period would have fallen in THIS month, not merely the next one
 // — the comparison she asked for only works if the ghost keeps its cadence
 // across every month she looks at. A window slightly wider than the grid
 // covers the padding days at either end.

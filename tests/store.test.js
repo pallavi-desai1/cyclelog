@@ -55,7 +55,7 @@ describe('saveDocument and loadDocument', () => {
   });
 
   // Review Focus 1: "no vault yet" and "wrong passphrase" are different
-  // answers, and conflating them would present nine years of history as a
+  // answers, and conflating them would present years of history as a
   // fresh install.
   it('returns null when no vault has been written', async () => {
     expect(await loadDocument(memoryBackend(), await generateKey())).toBeNull();

@@ -1,6 +1,6 @@
 import { diffDays } from './dates.js';
 
-// 18 months. Long enough that nine years of history still informs the model,
+// 18 months. Long enough that years of history still informs the model,
 // short enough that a pattern which has measurably shortened is respected.
 export const HALF_LIFE_DAYS = 548;
 

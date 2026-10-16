@@ -469,9 +469,10 @@ describe('predictionStatus', () => {
 });
 
 describe('model status fields', () => {
-  // The episode begins AFTER the last logged period, which mirrors the owner's
-  // real situation: her method was started several weeks into a cycle, with
-  // nothing logged since. A fixture where she has already bled on the method is
+  // The episode begins AFTER the last logged period: a method started several
+  // weeks into a cycle, with nothing logged since. That ordering is the one
+  // that breaks naive status logic. A fixture where a period has already
+  // arrived on the method is
   // a different case, covered in its own describe block below. (Deliberately
   // described rather than dated — the privacy guard flags real dates in tracked
   // content, and it caught an earlier draft of this very comment.)

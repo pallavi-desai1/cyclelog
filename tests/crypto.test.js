@@ -48,7 +48,7 @@ describe('seal and open', () => {
 
   // Review Focus 1: a wrong passphrase must throw, never return something
   // plausible. A caller that caught this and returned an empty vault would
-  // silently present nine years of history as a fresh install.
+  // silently present years of history as a fresh install.
   it('throws on the wrong key rather than returning anything', async () => {
     const sealed = await seal(await generateKey(), PLAINTEXT);
     await expect(open(await generateKey(), sealed)).rejects.toThrow();

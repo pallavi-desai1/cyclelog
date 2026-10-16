@@ -248,8 +248,8 @@ export function adaptedModel(cycles, doc, todayISO) {
   // A method begun mid-cycle would otherwise report "late" indefinitely.
   const previousDate = projectPrevious(anchor, length, todayISO);
 
-  // A period logged inside the episode is evidence she is one of the roughly
-  // one in five who keep bleeding on an implant. That closes the question
+  // A period logged inside the episode is evidence that this owner keeps
+  // bleeding on a suppressing method, as a sizeable minority do. That closes the question
   // "will I bleed at all" for this episode, so the model returns to predicting
   // dates with the widened sigma rather than re-asserting absence after every
   // prediction. The anchor IS the most recent period start, so it sitting after

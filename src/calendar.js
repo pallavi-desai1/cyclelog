@@ -61,7 +61,7 @@ export function projectedDates(anchorISO, lengthDays, fromISO, toISO) {
 }
 
 // Every month worth offering in the picker: from the earliest thing she ever
-// recorded to a little past today. Paging nine years back one arrow at a time
+// recorded to a little past today. Paging years back one arrow at a time
 // is not a navigation method.
 export function monthRange(doc, todayISO) {
   const months = [monthOf(todayISO)];

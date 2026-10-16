@@ -85,9 +85,9 @@ const span = (start, end, precision, endPrecision) => ({
   start, end, precision, endPrecision, source: EDIT_SOURCE,
 });
 
-// Surgical, never a rebuild. 48 of her periods have no day entries behind
-// them — they came from a text log of start and end dates — so deriving
-// spans from days would delete them. Only the span touching this date is
+// Surgical, never a rebuild. Many imported periods have no day entries
+// behind them — a text log of start and end dates records no per-day flow —
+// so deriving spans from days would delete them. Only the span touching this date is
 // changed; every other span is carried across untouched.
 function addToSpans(spans, dateISO) {
   if (spanCovering(spans, dateISO) !== null) return spans;
@@ -155,7 +155,7 @@ export function setFlow(doc, dateISO, flow) {
 // form reports `flow: null` whether she left it alone or deliberately
 // cleared it — and routing an untouched save through setFlow unconditionally
 // reads a never-recorded flow as a removal, splitting or shrinking whatever
-// period silently covers that day (Review Focus 2: 48 of her 110 periods
+// period silently covers that day (Review Focus 2: many imported periods
 // have no day entries behind them, so this is not a corner case for her).
 // A deliberate clear still moves the spans correctly, because `existingFlow`
 // is non-null in that case and therefore differs from `null`.
