@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   FLOW_OPTIONS, CRAMP_OPTIONS, MOOD_OPTIONS, PAIN_OPTIONS,
+  SPOTTING_OPTIONS, DISCHARGE_OPTIONS, TEST_OPTIONS,
   renderEditor, patchFromValues,
 } from '../src/ui/editor.js';
 import { dayDetail } from '../src/day.js';
@@ -46,6 +47,23 @@ describe('the option lists', () => {
     for (const pain of ['breast_tenderness', 'headache', 'ovulation']) {
       expect(values, pain).toContain(pain);
     }
+  });
+
+  it('covers exactly the spec\'s seven discharge values', () => {
+    const values = DISCHARGE_OPTIONS.map(opt => opt.value).sort();
+    expect(values).toEqual(
+      ['creamy', 'egg_white', 'none', 'spotty', 'sticky', 'unusual', 'watery'].sort(),
+    );
+  });
+
+  it('covers the three spotting values', () => {
+    const values = SPOTTING_OPTIONS.map(opt => opt.value).sort();
+    expect(values).toEqual(['brown', 'none', 'red'].sort());
+  });
+
+  it('covers the two test result values', () => {
+    const values = TEST_OPTIONS.map(opt => opt.value).sort();
+    expect(values).toEqual(['negative', 'positive'].sort());
   });
 
   it('gives every option a label a person would read', () => {

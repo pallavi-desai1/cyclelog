@@ -20,7 +20,8 @@ export const SPOTTING_OPTIONS = [
 
 export const DISCHARGE_OPTIONS = [
   option('none', 'None'), option('sticky', 'Sticky'), option('creamy', 'Creamy'),
-  option('egg_white', 'Egg white'), option('watery', 'Watery'), option('atypical', 'Atypical'),
+  option('egg_white', 'Egg white'), option('watery', 'Watery'), option('spotty', 'Spotty'),
+  option('unusual', 'Unusual'),
 ];
 
 export const MOOD_OPTIONS = [
