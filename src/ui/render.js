@@ -99,6 +99,11 @@ export function renderSummary(summary) {
 // flow, a ring for spotting, an underline for PMS, an outline for a predicted
 // day — and named in the cell's aria-label, so nothing depends on colour
 // alone (§10.3).
+// Flow arrives from imported data, so it is whitelisted into a class rather
+// than interpolated: an unrecognised value gets the plain period dot instead
+// of a new selector built from whatever the file contained.
+const FLOW_CLASS = { light: 'flow-light', medium: 'flow-medium', heavy: 'flow-heavy' };
+
 function cellLabel(cell) {
   const parts = [`${cell.day}`];
   if (cell.isToday) parts.push('today');
@@ -111,26 +116,14 @@ function cellLabel(cell) {
   return parts.join(', ');
 }
 
-// Flow arrives from imported data, so it is whitelisted into a class rather
-// than interpolated: an unrecognised value gets the plain period fill
-// instead of a new selector built from whatever the file contained.
-const FILL_CLASS = {
-  light: 'cal-flow-light', medium: 'cal-flow-medium', heavy: 'cal-flow-heavy',
-};
-
 function cellClasses(cell) {
   const classes = ['cal-cell'];
   if (!cell.inMonth) classes.push('cal-out');
   if (cell.isToday) classes.push('cal-today');
-  if (cell.isPeriod) {
-    classes.push('cal-period');
-    // The fill is what makes a month readable at a glance; the dot inside it
-    // repeats the intensity as a shape, for anyone who cannot rely on hue.
-    classes.push(FILL_CLASS[cell.flow] ?? 'cal-flow-medium');
-  } else if (FILL_CLASS[cell.flow]) {
-    // Bleeding recorded on a day no span covers — still bleeding.
-    classes.push('cal-period', FILL_CLASS[cell.flow]);
-  }
+  // Bleeding is drawn as a dot beneath the date, never as a fill behind it:
+  // a filled cell puts the date number on top of its own colour, and the
+  // number is the thing she is reading.
+  if (cell.isPeriod || FLOW_CLASS[cell.flow]) classes.push('cal-period');
   if (cell.pms) classes.push('cal-pms');
   if (cell.spotting) classes.push('cal-spotting');
   if (cell.testPositive) classes.push('cal-test');
@@ -143,9 +136,9 @@ function cellClasses(cell) {
 // means nothing. Each swatch carries the same class as the cells it explains,
 // so the legend cannot drift away from the calendar.
 const LEGEND = [
-  ['cal-period cal-flow-light', 'Light'],
-  ['cal-period cal-flow-medium', 'Medium'],
-  ['cal-period cal-flow-heavy', 'Heavy'],
+  ['cal-swatch-light', 'Light'],
+  ['cal-swatch-medium', 'Medium'],
+  ['cal-swatch-heavy', 'Heavy'],
   ['cal-spotting', 'Spotting'],
   ['cal-pms', 'PMS'],
   ['cal-test', 'Positive test'],
@@ -160,7 +153,6 @@ function renderLegend() {
   return `<ul class="cal-legend">${items}</ul>`;
 }
 
-const FLOW_CLASS = { light: 'flow-light', medium: 'flow-medium', heavy: 'flow-heavy' };
 
 function flowDot(cell) {
   const className = FLOW_CLASS[cell.flow];

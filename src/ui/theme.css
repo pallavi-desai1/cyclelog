@@ -232,7 +232,7 @@ input { font-family: var(--font-body); }
 
 .cal-day { font-size: 0.9em; font-family: var(--font-body); }
 
-.cal-dot { display: block; border-radius: 50%; }
+.cal-dot { display: block; border-radius: 50%; flex: none; }
 
 .flow-light { width: 6px; height: 6px; background: var(--flow-light); }
 .flow-medium { width: 9px; height: 9px; background: var(--flow-medium); }
@@ -281,15 +281,9 @@ input { font-family: var(--font-body); }
    named in the cell's aria-label and in the legend, and every one of these
    states additionally carries a shape — a dot, a ring, an underline, an
    outline — so none of it depends on hue alone. */
-.cal-flow-light { background: var(--flow-light); }
-.cal-flow-medium { background: var(--flow-medium); }
-.cal-flow-heavy { background: var(--flow-heavy); color: #FFFFFF; }
-
 /* Her words: white for where the period would have been. A hollow cell
    against the filled real ones, ringed in dashed lavender. */
 .cal-baseline { background: #FFFFFF; }
-
-.cal-spotting { background: #F3E3DC; }
 
 .cal-pms { box-shadow: inset 0 -4px 0 var(--warning); }
 
@@ -318,10 +312,26 @@ input { font-family: var(--font-body); }
 
 .cal-legend li { display: flex; align-items: center; gap: 5px; }
 
+/* The three intensities appear in the key as the same dots the grid draws,
+   at the same three sizes. Declared after .cal-swatch so they win, and
+   written out separately so each rule stands alone. */
+.cal-swatch-light {
+  width: 6px; height: 6px; border: 0; border-radius: 50%;
+  background: var(--flow-light);
+}
+
+.cal-swatch-medium {
+  width: 9px; height: 9px; border: 0; border-radius: 50%;
+  background: var(--flow-medium);
+}
+
+.cal-swatch-heavy {
+  width: 12px; height: 12px; border: 0; border-radius: 50%;
+  background: var(--flow-heavy);
+}
+
 
 @media (prefers-color-scheme: dark) {
   /* The ghost stays hollow rather than literally white, which would glare. */
   .cal-baseline { background: var(--surface); }
-  .cal-spotting { background: #3A2A24; }
-  .cal-flow-light { color: var(--text); }
 }

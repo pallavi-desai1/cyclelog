@@ -304,6 +304,7 @@ describe('calendar styling', () => {
     for (const selector of [
       '.cal-grid', '.cal-weekday', '.cal-cell', '.cal-out', '.cal-today',
       '.cal-dot', '.flow-light', '.flow-medium', '.flow-heavy',
+      '.cal-swatch-light', '.cal-swatch-medium', '.cal-swatch-heavy',
       '.cal-spotting', '.cal-pms', '.cal-predicted', '.cal-baseline',
     ]) {
       expect(hasSelector(selector), selector).toBe(true);
@@ -426,16 +427,30 @@ describe('legend swatches', () => {
     const base = text.indexOf('.cal-swatch {');
     expect(base, '.cal-swatch base rule').toBeGreaterThan(-1);
     for (const selector of [
-      '.cal-flow-light {', '.cal-flow-medium {', '.cal-flow-heavy {',
       '.cal-spotting {', '.cal-predicted {', '.cal-baseline {',
     ]) {
       expect(text.indexOf(selector), selector).toBeGreaterThan(base);
     }
   });
 
-  it('gives the three intensities three different fills', () => {
-    const fills = ['.cal-flow-light', '.cal-flow-medium', '.cal-flow-heavy']
-      .map(selector => ruleBody(selector).match(/background:\s*([^;]+);/)[1].trim());
-    expect(new Set(fills).size).toBe(3);
+  it('shows the three intensities in the key as three different dots', () => {
+    const swatches = ['.cal-swatch-light', '.cal-swatch-medium', '.cal-swatch-heavy']
+      .map(selector => ruleBody(selector));
+    const colours = swatches.map(rule => rule.match(/background:\s*([^;]+);/)[1].trim());
+    const sizes = swatches.map(rule => Number(rule.match(/width:\s*([\d.]+)/)[1]));
+    expect(new Set(colours).size).toBe(3);
+    expect(sizes[0]).toBeLessThan(sizes[1]);
+    expect(sizes[1]).toBeLessThan(sizes[2]);
+  });
+
+  // The key's dots are declared after the swatch base, which sets a square
+  // 14px box; without that order every legend dot would be the same size.
+  it('declares the key dots after the swatch base', () => {
+    const text = cssRules();
+    expect(text.indexOf('.cal-swatch-light {')).toBeGreaterThan(text.indexOf('.cal-swatch {'));
+  });
+
+  it('never paints a cell fill behind a date number', () => {
+    expect(cssRules()).not.toMatch(/\.cal-flow-(light|medium|heavy)\s*\{/);
   });
 });

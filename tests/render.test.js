@@ -332,22 +332,26 @@ describe('calendar colour coding', () => {
     { month: '2015-03', todayISO: '2015-03-10', ...options },
   );
 
-  it('fills a bleeding day by intensity', () => {
+  // Bleeding is a dot beneath the date, not a fill behind it: a filled cell
+  // puts the number on top of its own colour, and the number is what she is
+  // reading.
+  it('shows intensity as a dot, and never as a cell fill', () => {
     const html = renderCalendar(grid({
       '2015-03-02': { flow: 'light' },
       '2015-03-03': { flow: 'medium' },
       '2015-03-04': { flow: 'heavy' },
     }));
-    expect(html).toContain('cal-flow-light');
-    expect(html).toContain('cal-flow-medium');
-    expect(html).toContain('cal-flow-heavy');
+    expect(html).toContain('cal-dot flow-light');
+    expect(html).toContain('cal-dot flow-medium');
+    expect(html).toContain('cal-dot flow-heavy');
+    expect(html).not.toContain('cal-flow-');
   });
 
-  it('fills a period day whose intensity was never recorded', () => {
+  it('gives a period day whose intensity was never recorded a plain dot', () => {
     const html = renderCalendar(grid({}, {
       spans: [{ start: '2015-03-02', end: '2015-03-04', source: 'test' }],
     }));
-    expect(html).toContain('cal-flow-medium');
+    expect(html).toContain('cal-dot flow-medium');
   });
 
   it('marks a positive test', () => {
@@ -370,8 +374,8 @@ describe('calendar colour coding', () => {
   it('gives each legend swatch the class of the cells it explains', () => {
     const legend = renderCalendar(grid({})).match(/<ul class="cal-legend">[\s\S]*<\/ul>/)[0];
     for (const className of [
-      'cal-flow-light', 'cal-flow-heavy', 'cal-spotting', 'cal-pms',
-      'cal-test', 'cal-predicted', 'cal-baseline',
+      'cal-swatch-light', 'cal-swatch-medium', 'cal-swatch-heavy',
+      'cal-spotting', 'cal-pms', 'cal-test', 'cal-predicted', 'cal-baseline',
     ]) {
       expect(legend, className).toContain(className);
     }
