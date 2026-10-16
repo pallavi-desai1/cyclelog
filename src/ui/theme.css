@@ -11,6 +11,13 @@
   --flow-medium: #F08CAE;
   --flow-heavy: #C83D6B;
 
+  /* The date number sits ON the flow fill, so the fill has to carry dark
+     text. The spec's #C83D6B cannot: even pure black reaches only 4.36:1 on
+     it, short of the 4.5 bar, so the heavy FILL is one notch lighter while
+     #C83D6B stays the colour of the dot. */
+  --flow-heavy-fill: #DA5C86;
+  --ink-on-flow: #2A0C33;
+
   --baseline: #B9A4D4;
   --positive: #3F8F86;
   --spotting: #A9705B;
@@ -254,6 +261,18 @@ input { font-family: var(--font-body); }
   flex: none;
 }
 
+/* Period days are filled, so a month reads at a glance. The date number on
+   top switches to a dark purple that clears 4.5:1 on all three fills. */
+.cal-flow-light { background: var(--flow-light); }
+.cal-flow-medium { background: var(--flow-medium); }
+.cal-flow-heavy { background: var(--flow-heavy-fill); }
+
+.cal-period { color: var(--ink-on-flow); }
+
+/* On a filled day the dot carries intensity by size alone, in the same ink
+   as the number — a coloured dot on a coloured cell would disappear. */
+.cal-period .cal-dot { background: var(--ink-on-flow); opacity: 0.55; }
+
 .cal-spotting { box-shadow: inset 0 0 0 2px var(--spotting); }
 
 .cal-pms { text-decoration: underline 2px var(--warning); text-underline-offset: 2px; }
@@ -312,23 +331,11 @@ input { font-family: var(--font-body); }
 
 .cal-legend li { display: flex; align-items: center; gap: 5px; }
 
-/* The three intensities appear in the key as the same dots the grid draws,
-   at the same three sizes. Declared after .cal-swatch so they win, and
-   written out separately so each rule stands alone. */
-.cal-swatch-light {
-  width: 6px; height: 6px; border: 0; border-radius: 50%;
-  background: var(--flow-light);
-}
-
-.cal-swatch-medium {
-  width: 9px; height: 9px; border: 0; border-radius: 50%;
-  background: var(--flow-medium);
-}
-
-.cal-swatch-heavy {
-  width: 12px; height: 12px; border: 0; border-radius: 50%;
-  background: var(--flow-heavy);
-}
+/* The key shows the same filled squares the grid draws, in the same three
+   colours. Declared after .cal-swatch so they win on equal specificity. */
+.cal-swatch-light { background: var(--flow-light); }
+.cal-swatch-medium { background: var(--flow-medium); }
+.cal-swatch-heavy { background: var(--flow-heavy-fill); }
 
 
 @media (prefers-color-scheme: dark) {

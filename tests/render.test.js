@@ -332,19 +332,18 @@ describe('calendar colour coding', () => {
     { month: '2015-03', todayISO: '2015-03-10', ...options },
   );
 
-  // Bleeding is a dot beneath the date, not a fill behind it: a filled cell
-  // puts the number on top of its own colour, and the number is what she is
-  // reading.
-  it('shows intensity as a dot, and never as a cell fill', () => {
+  // The fill is the at-a-glance encoding; the dot inside repeats the
+  // intensity as a size, which is what survives colour blindness.
+  it('fills a bleeding day by intensity, and keeps the dot', () => {
     const html = renderCalendar(grid({
       '2015-03-02': { flow: 'light' },
       '2015-03-03': { flow: 'medium' },
       '2015-03-04': { flow: 'heavy' },
     }));
-    expect(html).toContain('cal-dot flow-light');
-    expect(html).toContain('cal-dot flow-medium');
-    expect(html).toContain('cal-dot flow-heavy');
-    expect(html).not.toContain('cal-flow-');
+    for (const intensity of ['light', 'medium', 'heavy']) {
+      expect(html).toContain(`cal-flow-${intensity}`);
+      expect(html).toContain(`cal-dot flow-${intensity}`);
+    }
   });
 
   it('gives a period day whose intensity was never recorded a plain dot', () => {

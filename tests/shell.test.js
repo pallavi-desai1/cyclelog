@@ -305,6 +305,7 @@ describe('calendar styling', () => {
       '.cal-grid', '.cal-weekday', '.cal-cell', '.cal-out', '.cal-today',
       '.cal-dot', '.flow-light', '.flow-medium', '.flow-heavy',
       '.cal-swatch-light', '.cal-swatch-medium', '.cal-swatch-heavy',
+      '.cal-flow-light', '.cal-flow-medium', '.cal-flow-heavy',
       '.cal-spotting', '.cal-pms', '.cal-predicted', '.cal-baseline',
     ]) {
       expect(hasSelector(selector), selector).toBe(true);
@@ -433,14 +434,10 @@ describe('legend swatches', () => {
     }
   });
 
-  it('shows the three intensities in the key as three different dots', () => {
-    const swatches = ['.cal-swatch-light', '.cal-swatch-medium', '.cal-swatch-heavy']
-      .map(selector => ruleBody(selector));
-    const colours = swatches.map(rule => rule.match(/background:\s*([^;]+);/)[1].trim());
-    const sizes = swatches.map(rule => Number(rule.match(/width:\s*([\d.]+)/)[1]));
+  it('shows the three intensities in the key as three different fills', () => {
+    const colours = ['.cal-swatch-light', '.cal-swatch-medium', '.cal-swatch-heavy']
+      .map(selector => ruleBody(selector).match(/background:\s*([^;]+);/)[1].trim());
     expect(new Set(colours).size).toBe(3);
-    expect(sizes[0]).toBeLessThan(sizes[1]);
-    expect(sizes[1]).toBeLessThan(sizes[2]);
   });
 
   // The key's dots are declared after the swatch base, which sets a square
@@ -450,7 +447,31 @@ describe('legend swatches', () => {
     expect(text.indexOf('.cal-swatch-light {')).toBeGreaterThan(text.indexOf('.cal-swatch {'));
   });
 
-  it('never paints a cell fill behind a date number', () => {
-    expect(cssRules()).not.toMatch(/\.cal-flow-(light|medium|heavy)\s*\{/);
+  // The date number sits on the fill, so every fill has to carry it at the
+  // 4.5:1 bar for normal text. The spec's #C83D6B cannot — even pure black
+  // reaches 4.36:1 on it — which is why the heavy FILL is a notch lighter
+  // than the heavy dot.
+  it('keeps the date number readable on every flow fill', () => {
+    const value = token => css().match(new RegExp(`${token}:\\s*(#[0-9A-Fa-f]{6})`))[1];
+    const luminance = hex => {
+      const channels = [1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16) / 255);
+      const [r, g, b] = channels.map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ratio = (a, b) => {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+
+    const ink = value('--ink-on-flow');
+    for (const fill of ['--flow-light', '--flow-medium', '--flow-heavy-fill']) {
+      expect(ratio(ink, value(fill)), fill).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('orders the fills from lightest to deepest', () => {
+    const value = token => css().match(new RegExp(`${token}:\\s*(#[0-9A-Fa-f]{6})`))[1];
+    expect(value('--flow-light')).not.toBe(value('--flow-medium'));
+    expect(value('--flow-medium')).not.toBe(value('--flow-heavy-fill'));
   });
 });

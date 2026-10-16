@@ -116,14 +116,19 @@ function cellLabel(cell) {
   return parts.join(', ');
 }
 
+const FILL_CLASS = {
+  light: 'cal-flow-light', medium: 'cal-flow-medium', heavy: 'cal-flow-heavy',
+};
+
 function cellClasses(cell) {
   const classes = ['cal-cell'];
   if (!cell.inMonth) classes.push('cal-out');
   if (cell.isToday) classes.push('cal-today');
-  // Bleeding is drawn as a dot beneath the date, never as a fill behind it:
-  // a filled cell puts the date number on top of its own colour, and the
-  // number is the thing she is reading.
-  if (cell.isPeriod || FLOW_CLASS[cell.flow]) classes.push('cal-period');
+  // A filled day is what makes a month readable at a glance; the date number
+  // on top switches to an ink dark enough to stay legible on every fill.
+  if (cell.isPeriod || FLOW_CLASS[cell.flow]) {
+    classes.push('cal-period', FILL_CLASS[cell.flow] ?? 'cal-flow-medium');
+  }
   if (cell.pms) classes.push('cal-pms');
   if (cell.spotting) classes.push('cal-spotting');
   if (cell.testPositive) classes.push('cal-test');
