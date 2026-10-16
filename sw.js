@@ -1,7 +1,7 @@
 // Bump CACHE_VERSION on every deploy. A stale module served from an old
 // cache is the one failure mode that would make the app lie about her data,
 // so activation deletes every cache that is not this one.
-const CACHE_VERSION = '5';
+const CACHE_VERSION = '6';
 const CACHE_NAME = `cyclelog-${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -57,12 +57,35 @@ self.addEventListener('activate', event => {
   );
 });
 
+// Network first, with the cache as the offline fallback.
+//
+// Cache-first was the wrong trade here. It pinned an old shell against a new
+// one: a worker installed before the calendar existed kept serving its cached
+// copy of index.html and theme.css, so the app came up with no calendar and
+// no fonts and no reload could get past it. Offline support is worth a lot,
+// but not at the price of a device stuck on an old version of her app.
+async function respond(request) {
+  try {
+    const response = await fetch(request);
+    // Only a success is worth keeping; a 404 cached here would outlive the
+    // mistake that caused it.
+    if (response.ok) {
+      const copy = response.clone();
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, copy);
+    }
+    return response;
+  } catch (networkError) {
+    const cached = await caches.match(request);
+    // respondWith(undefined) throws, which would turn an offline miss into a
+    // broken page rather than a plain network error.
+    return cached ?? Response.error();
+  }
+}
+
 self.addEventListener('fetch', event => {
   const { request } = event;
   if (request.method !== 'GET') return;
   if (new URL(request.url).origin !== self.location.origin) return;
-
-  event.respondWith(
-    caches.match(request).then(hit => hit || fetch(request)),
-  );
+  event.respondWith(respond(request));
 });

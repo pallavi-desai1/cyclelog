@@ -375,6 +375,38 @@ describe('service worker', () => {
   it('never caches a response it did not fetch from this origin', () => {
     expect(sw()).toContain('new URL(request.url).origin');
   });
+
+  // Cache-first pinned an old shell against a new one: a stale worker kept
+  // serving the pre-calendar page and its stylesheet, and no reload could get
+  // past it. Network-first means a deploy reaches the device immediately and
+  // the cache is only what makes it work offline.
+  it('hands the fetch event to the network-first responder', () => {
+    const listener = sw().slice(sw().indexOf("addEventListener('fetch'"));
+    expect(listener).toMatch(/respondWith\(respond\(request\)\)/);
+  });
+
+  it('goes to the network first and falls back to the cache', () => {
+    const handler = sw().slice(sw().indexOf('async function respond'));
+    const network = handler.indexOf('await fetch(request)');
+    const fallback = handler.indexOf('caches.match(request)');
+    expect(network, 'fetch(request)').toBeGreaterThan(-1);
+    expect(fallback, 'caches.match(request)').toBeGreaterThan(-1);
+    expect(network, 'network attempted before the cache').toBeLessThan(fallback);
+  });
+
+  it('refreshes the cache from a successful response', () => {
+    const handler = sw().slice(sw().indexOf('async function respond'));
+    expect(handler).toMatch(/response\.ok/);
+    expect(handler).toMatch(/cache\.put\(/);
+    expect(handler).toMatch(/\.clone\(\)/);
+  });
+
+  it('still answers when the network fails and the cache has nothing', () => {
+    // respondWith(undefined) throws, which would turn an offline miss into a
+    // broken page rather than a plain network error.
+    const handler = sw().slice(sw().indexOf('async function respond'));
+    expect(handler).toMatch(/Response\(|Response\.error\(/);
+  });
 });
 
 describe('boot module', () => {
