@@ -415,3 +415,27 @@ describe('day panel and selection styling', () => {
     expect(css()).toMatch(/\.cal-cell:focus-visible/);
   });
 });
+
+describe('legend swatches', () => {
+  // .cal-swatch and the state fills have equal specificity, so source order
+  // decides. With the base rule last, it painted every swatch the same
+  // surface colour and stripped the prediction's border: the legend showed
+  // three identical blanks where light, medium and heavy should differ.
+  it('declares the swatch base before the state fills, so the states win', () => {
+    const text = cssRules();
+    const base = text.indexOf('.cal-swatch {');
+    expect(base, '.cal-swatch base rule').toBeGreaterThan(-1);
+    for (const selector of [
+      '.cal-flow-light {', '.cal-flow-medium {', '.cal-flow-heavy {',
+      '.cal-spotting {', '.cal-predicted {', '.cal-baseline {',
+    ]) {
+      expect(text.indexOf(selector), selector).toBeGreaterThan(base);
+    }
+  });
+
+  it('gives the three intensities three different fills', () => {
+    const fills = ['.cal-flow-light', '.cal-flow-medium', '.cal-flow-heavy']
+      .map(selector => ruleBody(selector).match(/background:\s*([^;]+);/)[1].trim());
+    expect(new Set(fills).size).toBe(3);
+  });
+});
