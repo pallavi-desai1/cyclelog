@@ -32,6 +32,7 @@ const PRECACHE = [
   'src/import.js',
   'src/edit.js',
   'src/ui/render.js',
+  'src/ui/editor.js',
   'src/today.js',
   'icons/icon-180.png',
   'icons/icon-192.png',
