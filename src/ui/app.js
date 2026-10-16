@@ -14,7 +14,7 @@ import { renderSummary, renderCalendar, renderDay } from './render.js';
 import { localToday } from '../today.js';
 import { addDays } from '../dates.js';
 import { setDayFields, setFlow, setApproximate } from '../edit.js';
-import { renderEditor, patchFromValues } from './editor.js';
+import { renderEditor, patchFromValues, isCurrentSession } from './editor.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -58,6 +58,11 @@ function returnToLock() {
   // replace, but the flag that says "a form is open" is state in this
   // module, and must not survive to the next unlock.
   editing = null;
+  // A save already in flight when the lock fires still finishes and still
+  // writes to the vault correctly — that write must not be undone. What the
+  // epoch bump prevents is the *view* adopting that write afterwards, on top
+  // of a lock screen that has nothing to do with it any more.
+  sessionEpoch += 1;
   // Before any vault exists she is mid-setup, and a hide fires here for
   // ordinary reasons — the file picker, a glance at another app. Switching
   // screens then would strand her on a lock screen for a vault that does not
@@ -81,6 +86,18 @@ let selectedDate = null;
 // showing its read-only view instead. Cleared by returnToLock, by a
 // successful save, and by Cancel.
 let editing = null;
+
+// Bumped on every lock and on every fresh openEditor call, so a save whose
+// write resolves after either event can tell its own session is stale. The
+// vault write it made is still correct and final; this only gates whether
+// the view may act on it afterwards.
+let sessionEpoch = 0;
+
+// A real lock on saveDay itself, not just the button's `disabled` attribute:
+// the panel is re-rendered by Cancel/openEditor mid-save, which would hand a
+// second call a brand-new, enabled button while the first save is still
+// pending.
+let saveInFlight = false;
 
 function paint(note = '') {
   openDoc = parseDocument(vault.read());
@@ -148,6 +165,11 @@ function selectDay(date) {
 function openEditor(date) {
   if (openDoc === null) return;
   editing = date;
+  // A fresh editor is a fresh session: any save still pending from whatever
+  // was open before this must not reach back in and adopt its document once
+  // this form (possibly for a different day, possibly typed into already)
+  // is the one on screen.
+  sessionEpoch += 1;
   el('day-detail').innerHTML = renderEditor(dayDetail(openDoc, date, {
     todayISO: localToday(),
     adaptedDate: openSummary.adapted.date,
@@ -178,9 +200,12 @@ function formValues() {
 }
 
 async function saveDay() {
-  if (editing === null || el('edit-save').disabled) return;
-  el('edit-save').disabled = true;
+  if (editing === null || saveInFlight) return;
+  saveInFlight = true;
+  const button = el('edit-save');
+  if (button !== null) button.disabled = true;
   const date = editing;
+  const epoch = sessionEpoch;
   try {
     const { flow, patch, approximate } = patchFromValues(formValues());
     let next = setDayFields(openDoc, date, patch);
@@ -191,6 +216,13 @@ async function saveDay() {
     // until the encrypted write has resolved, so a failed save leaves her
     // looking at what is actually stored.
     await vault.save(serializeDocument(next));
+
+    // The write above can take two IndexedDB round trips. A lock or a fresh
+    // openEditor call can land in that window — the write already happened
+    // and is correct, but this session is no longer the one on screen, and
+    // must not reach back in and repaint over whatever replaced it.
+    if (!isCurrentSession({ epochAtStart: epoch, epochNow: sessionEpoch, editing, date })) return;
+
     openDoc = next;
     openSummary = buildSummary(openDoc, localToday());
     el('summary').innerHTML = renderSummary(openSummary);
@@ -198,10 +230,18 @@ async function saveDay() {
     editing = null;
     selectDay(date);
   } catch {
-    say('edit-error', 'That did not save. Your entry is still here — try again.');
+    if (!isCurrentSession({ epochAtStart: epoch, epochNow: sessionEpoch, editing, date })) return;
+    // el() is not used here: the panel that held #edit-error may already
+    // have been replaced by a later openEditor/selectDay call, and a missing
+    // element must not throw inside a catch.
+    const errorField = document.getElementById('edit-error');
+    if (errorField !== null) {
+      errorField.textContent = 'That did not save. Your entry is still here — try again.';
+    }
   } finally {
-    const button = el('edit-save');
-    if (button !== null) button.disabled = false;
+    saveInFlight = false;
+    const saveButton = document.getElementById('edit-save');
+    if (saveButton !== null) saveButton.disabled = false;
   }
 }
 

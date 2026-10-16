@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   FLOW_OPTIONS, CRAMP_OPTIONS, MOOD_OPTIONS, PAIN_OPTIONS,
   SPOTTING_OPTIONS, DISCHARGE_OPTIONS, TEST_OPTIONS,
-  renderEditor, patchFromValues,
+  renderEditor, patchFromValues, isCurrentSession,
 } from '../src/ui/editor.js';
 import { dayDetail } from '../src/day.js';
 
@@ -198,5 +198,36 @@ describe('patchFromValues', () => {
     for (const field of ['cramps', 'spotting', 'discharge', 'pms', 'mood', 'pain', 'tests', 'notes']) {
       expect(patch, field).toHaveProperty(field);
     }
+  });
+});
+
+// vault.save awaits two IndexedDB round trips (seal(), then backend.set()),
+// so the session can move on — a lock, or a fresh editor opened over the
+// same or a different day — before a pending save resolves. The write
+// already landed in the vault and is never rolled back; this function only
+// decides whether the *view* may still act on it once it does.
+describe('isCurrentSession', () => {
+  it('adopts when the epoch has not moved and the same day is still open', () => {
+    expect(isCurrentSession({
+      epochAtStart: 1, epochNow: 1, editing: '2015-03-01', date: '2015-03-01',
+    })).toBe(true);
+  });
+
+  it('does not adopt once the epoch has moved — a lock or a fresh editor fired', () => {
+    expect(isCurrentSession({
+      epochAtStart: 1, epochNow: 2, editing: '2015-03-01', date: '2015-03-01',
+    })).toBe(false);
+  });
+
+  it('does not adopt when a different day is open now', () => {
+    expect(isCurrentSession({
+      epochAtStart: 1, epochNow: 1, editing: '2015-03-02', date: '2015-03-01',
+    })).toBe(false);
+  });
+
+  it('does not adopt once the editor has been cancelled', () => {
+    expect(isCurrentSession({
+      epochAtStart: 1, epochNow: 1, editing: null, date: '2015-03-01',
+    })).toBe(false);
   });
 });

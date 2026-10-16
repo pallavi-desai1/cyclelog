@@ -123,3 +123,13 @@ export function patchFromValues(values) {
     },
   };
 }
+
+// A save is only still "current" if nothing moved the session out from under
+// it while its write was in flight: the lock screen was not shown (the
+// epoch bumps on every lock and on every fresh openEditor call), and the
+// editor it was launched from is still the one open. A save that fails this
+// check already landed in the vault correctly — the vault is the authority,
+// never rolled back — this only decides whether the *view* may adopt it.
+export function isCurrentSession({ epochAtStart, epochNow, editing, date }) {
+  return epochAtStart === epochNow && editing === date;
+}

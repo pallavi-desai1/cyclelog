@@ -445,4 +445,57 @@ describe('editing a day', () => {
     expect(body).toMatch(/disabled/);
     expect(body).toMatch(/finally/);
   });
+
+  // Critical 1 (review): vault.save awaits two IndexedDB round trips
+  // (seal(), then backend.set()). A lock firing in that window must not let
+  // the continuation repaint the summary, calendar and day panel on top of
+  // the lock screen once the save resolves.
+  it('bumps the session epoch on every path back to the lock screen', () => {
+    expect(functionBody(app(), 'returnToLock')).toMatch(/sessionEpoch \+= 1/);
+  });
+
+  // Critical 1 & 2 (review): the epoch/editing check has to run after the
+  // await (it is reading state that may have changed while the write was in
+  // flight) and before openDoc is reassigned (nothing may be adopted on a
+  // stale session).
+  it('checks the session is still current after the await and before adopting the result', () => {
+    const body = functionBody(app(), 'saveDay');
+    const awaitIndex = body.indexOf('await vault.save');
+    const guardIndex = body.indexOf('isCurrentSession(');
+    const adoptIndex = body.indexOf('openDoc = ');
+    expect(awaitIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeGreaterThan(awaitIndex);
+    expect(adoptIndex).toBeGreaterThan(guardIndex);
+  });
+
+  // Critical 2 (review): the button's `disabled` attribute is not a lock —
+  // Cancel/openEditor re-render the panel and hand out a brand-new, enabled
+  // button while an earlier save is still pending. A real flag at module
+  // scope is what actually serialises concurrent saves.
+  it('serialises saves with a real in-flight flag, not just the button attribute', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body).toMatch(/if \(editing === null \|\| saveInFlight\) return;/);
+    expect(body).toMatch(/saveInFlight = true;/);
+    expect(body).toMatch(/finally\s*\{[\s\S]*saveInFlight = false;[\s\S]*\}/);
+  });
+
+  // Critical 2 (review): opening a fresh editor — even for the same day, even
+  // after Cancel — must invalidate any save still pending from whatever was
+  // open before it, so that save's continuation cannot reach back in and
+  // stomp what she is now typing.
+  it('bumps the session epoch whenever a fresh editor is opened', () => {
+    expect(functionBody(app(), 'openEditor')).toMatch(/sessionEpoch \+= 1/);
+  });
+
+  // Critical 2 (review): before this fix, the failure branch called
+  // say('edit-error', ...), which assumes the element exists. #edit-error
+  // can be gone by the time a stale save's catch runs (a later re-render
+  // replaced the panel), and a throw inside a catch is worse than the
+  // silent failure it would be reporting.
+  it('does not assume #edit-error still exists when reporting a failure', () => {
+    const body = functionBody(app(), 'saveDay');
+    const catchBody = body.slice(body.search(/\bcatch\b/));
+    expect(catchBody).toMatch(/getElementById\('edit-error'\)/);
+    expect(catchBody).toMatch(/if \(errorField !== null\)/);
+  });
 });
