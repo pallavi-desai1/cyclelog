@@ -236,6 +236,48 @@ describe('setup robustness', () => {
   });
 });
 
+describe('setup is not interrupted by a lock', () => {
+  // The bug this pins: returnToLock() switched screens unconditionally, so a
+  // page-hide during first-run setup — picking a file, taking a call, glancing
+  // at another app — replaced the setup screen with a lock screen for a vault
+  // that did not exist yet. Her passphrase then "did not work", because there
+  // was nothing to unlock, and only a reload got her back.
+  it('does not show the lock screen when no vault exists', () => {
+    const body = functionBody(app(), 'returnToLock');
+    expect(body, 'returnToLock').not.toBeNull();
+    const guard = body.indexOf('hasVault');
+    const switchToLock = body.indexOf("screen('lock')");
+    expect(guard, 'guards on hasVault').toBeGreaterThan(-1);
+    expect(guard, 'guard precedes the screen switch').toBeLessThan(switchToLock);
+  });
+
+  it('records that a vault exists once setup completes', () => {
+    const body = functionBody(app(), 'create');
+    expect(body).toMatch(/hasVault = true/);
+  });
+
+  it('records what start() found, so a reload knows too', () => {
+    const body = functionBody(app(), 'start');
+    expect(body).toMatch(/hasVault = /);
+  });
+});
+
+describe('an empty vault is not reported as a bad passphrase', () => {
+  // src/unlock.js distinguishes 'empty' from 'wrong-passphrase' precisely so
+  // this message can be honest. Collapsing them tells her a correct
+  // passphrase was wrong.
+  it('reads the reason rather than assuming a wrong passphrase', () => {
+    const body = functionBody(app(), 'unlock');
+    expect(body).toMatch(/reason === 'empty'/);
+  });
+
+  it('sends her back to setup when there is nothing to unlock', () => {
+    const body = functionBody(app(), 'unlock');
+    const emptyBranch = body.slice(body.indexOf("reason === 'empty'"));
+    expect(emptyBranch).toMatch(/screen\('setup'\)/);
+  });
+});
+
 describe('precache', () => {
   it('lists every module the app now imports', () => {
     for (const module of [

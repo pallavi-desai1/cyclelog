@@ -33,11 +33,20 @@ function screen(name) {
   }
 }
 
+// True once a vault exists on this device — set by start() on load and by
+// create() the moment setup succeeds.
+let hasVault = false;
+
 // Shared by the lock button, the visibility check and the idle timer: the
 // summary must not survive any path back to the lock screen.
 function returnToLock() {
   el('summary').innerHTML = '';
   say('import-notice', '');
+  // Before any vault exists she is mid-setup, and a hide fires here for
+  // ordinary reasons — the file picker, a glance at another app. Switching
+  // screens then would strand her on a lock screen for a vault that does not
+  // exist, where her new passphrase "does not work" and only a reload helps.
+  if (!hasVault) return;
   screen('lock');
 }
 
@@ -108,6 +117,7 @@ async function create() {
     awaitingEmptyConfirm = false;
     say('setup-progress', 'Encrypting…');
     await vault.setup(passphrase, serializeDocument(vaultDoc));
+    hasVault = true;
     clear('setup-passphrase');
     clear('setup-confirm');
     say('setup-progress', '');
@@ -129,7 +139,16 @@ async function unlock() {
   el('unlock').disabled = true;
   try {
     const result = await vault.unlock(el('passphrase').value);
-    if (!result.ok) return say('lock-error', 'That passphrase did not open the vault.');
+    if (!result.ok) {
+      // src/unlock.js keeps 'empty' and 'wrong-passphrase' apart on purpose;
+      // collapsing them here would tell her a correct passphrase was wrong.
+      if (result.reason === 'empty') {
+        say('lock-error', '');
+        screen('setup');
+        return say('setup-progress', 'No vault on this device yet — set one up.');
+      }
+      return say('lock-error', 'That passphrase did not open the vault.');
+    }
     say('lock-error', '');
     paint();
   } catch {
@@ -192,7 +211,8 @@ async function offerFaceId() {
 async function start() {
   try {
     const status = await vault.status();
-    if (status === 'empty') return screen('setup');
+    hasVault = status !== 'empty';
+    if (!hasVault) return screen('setup');
     screen('lock');
     if (biometricSupported() && (await readCredentialId(backend)) !== null) show('faceid');
   } catch {
