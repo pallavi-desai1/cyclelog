@@ -164,11 +164,15 @@ el('passphrase').addEventListener('keydown', event => {
   if (event.key === 'Enter') unlock();
 });
 
-// Backgrounding the app is activity stopping, so the idle clock is checked on
-// every return. A phone left on a table locks itself.
+// Re-lock immediately on hide, not just on idle timeout: iOS snapshots the
+// page for the app switcher the instant it is hidden, so the summary must
+// already be out of the DOM before that happens. The idle clock is still
+// checked on every return, for the case where the tab was never hidden at
+// all (e.g. switching to another window on desktop).
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    vault.touch();
+    vault.lock();
+    returnToLock();
     return;
   }
   if (vault.maybeIdleLock()) returnToLock();

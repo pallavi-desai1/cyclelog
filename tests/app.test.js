@@ -71,8 +71,24 @@ describe('app wiring', () => {
   });
 
   it('locks when the page is hidden, so a backgrounded app is not open', () => {
-    expect(app()).toContain('visibilitychange');
-    expect(app()).toContain('maybeIdleLock');
+    // Before the fix, the hidden branch called vault.touch() (extending the
+    // session across backgrounding) instead of vault.lock(). Assert the real
+    // behaviour, not just that the string "visibilitychange" appears.
+    const text = app();
+    expect(text).toContain('visibilitychange');
+    const handlerMatch = text.match(
+      /addEventListener\('visibilitychange', \(\) => \{([\s\S]*?)\n\}\);/,
+    );
+    expect(handlerMatch, 'visibilitychange handler').not.toBeNull();
+    const handler = handlerMatch[1];
+    const hiddenBranchMatch = handler.match(
+      /if \(document\.visibilityState === 'hidden'\) \{([\s\S]*?)\}/,
+    );
+    expect(hiddenBranchMatch, 'hidden branch').not.toBeNull();
+    const hiddenBranch = hiddenBranchMatch[1];
+    expect(hiddenBranch).toContain('vault.lock()');
+    expect(hiddenBranch).not.toContain('vault.touch()');
+    expect(text).toContain('maybeIdleLock');
   });
 
   it('offers Face ID only when the browser could support it', () => {
@@ -132,12 +148,14 @@ describe('idle locking', () => {
 
   it('touches the vault on real user activity', () => {
     // Without this, a real idle timer would lock the screen mid-use even
-    // while she is actively reading the card.
+    // while she is actively reading the card. (Page-hide is deliberately NOT
+    // one of these sites any more: hiding now locks immediately rather than
+    // extending the session — see the visibilitychange test above.)
     const text = app();
     expect(text).toContain("addEventListener('pointerdown'");
     expect(text).toContain("addEventListener('keydown'");
     const touches = (text.match(/vault\.touch\(\)/g) || []).length;
-    expect(touches).toBeGreaterThanOrEqual(3);
+    expect(touches).toBeGreaterThanOrEqual(2);
   });
 
   it('shares one lock-and-clear sequence across every lock site', () => {
