@@ -81,6 +81,10 @@ export async function loadDocument(backend, key) {
 }
 
 export async function eraseAll(backend) {
-  await backend.delete(VAULT_KEY);
+  // Meta first: a failure between the two deletes then leaves meta gone and
+  // the vault blob still present, which status() reports as 'empty' — a
+  // state setup can recover from. The reverse order would leave 'locked'
+  // with nothing to open.
   await backend.delete(META_KEY);
+  await backend.delete(VAULT_KEY);
 }

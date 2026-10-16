@@ -7,8 +7,8 @@ export function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ENTITIES[character]);
 }
 
-const one = value => (typeof value === 'number' ? value.toFixed(1) : '');
-const signed = value => `${value >= 0 ? '+' : ''}${value.toFixed(1)}`;
+const one = value => (Number.isFinite(value) ? value.toFixed(1) : '');
+const signed = value => (Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}` : '');
 
 // Every line is built only when its data exists, which is what keeps "null"
 // and "NaN" off a screen she reads out at an appointment.

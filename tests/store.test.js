@@ -137,4 +137,32 @@ describe('eraseAll', () => {
   it('is safe to call on an empty store', async () => {
     await expect(eraseAll(memoryBackend())).resolves.toBeUndefined();
   });
+
+  // Review Focus 6: a failure partway through must leave the store in a
+  // state setup can recover from. Deleting the vault first and meta second
+  // leaves 'locked' (meta present, vault gone) on a mid-failure — a status
+  // that reports an openable-looking vault with nothing inside it. Meta
+  // first leaves 'empty' instead, which setup already knows how to recover.
+  it('leaves a recoverable state when the second delete fails', async () => {
+    const backend = memoryBackend();
+    const key = await generateKey();
+    await writeMeta(backend, { version: 1, salt: [1, 2, 3], iterations: 1000 });
+    await saveDocument(backend, key, DOC);
+
+    let calls = 0;
+    const failing = {
+      ...backend,
+      delete: async (k) => {
+        calls += 1;
+        if (calls === 2) throw new Error('storage unavailable');
+        return backend.delete(k);
+      },
+    };
+
+    await expect(eraseAll(failing)).rejects.toThrow('storage unavailable');
+    // Meta must be gone even though the overall call failed, so status()
+    // reports 'empty' (recoverable by setup) rather than 'locked' (a vault
+    // that looks present but cannot be opened).
+    expect(await readMeta(backend)).toBeNull();
+  });
 });

@@ -117,6 +117,22 @@ describe('the summary card', () => {
     expect(html).toContain('&lt;img src=x&gt;');
   });
 
+  it('never prints the literal string NaN even if a NaN reaches the renderer directly', () => {
+    // one() and signed() gated on `typeof value === 'number'`, which NaN
+    // passes — unreachable today only because describeLengths/meanShift
+    // return null instead, but the codebase rule is Number.isFinite.
+    const summary = {
+      lastPeriod: null,
+      history: { median: NaN, mean: NaN, usableCycles: 5, excludedCount: 0, last12Median: null },
+      method: null,
+      headline: { kind: 'unavailable', text: 'Not enough data yet', daysLate: null },
+      adapted: { available: false },
+      baseline: { available: false },
+      divergence: { meanShift: NaN },
+    };
+    expect(renderSummary(summary)).not.toContain('NaN');
+  });
+
   it('produces balanced markup for every state', () => {
     for (const html of [render(doc(SUPPRESS), '2015-07-15'), render(EMPTY, '2015-07-15')]) {
       const opens = (html.match(/<(?!\/)[a-z]/g) ?? []).length;
