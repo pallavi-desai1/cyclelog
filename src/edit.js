@@ -77,9 +77,9 @@ const sortSpans = spans => [...spans].sort((a, b) => a.start.localeCompare(b.sta
 
 // precision/endPrecision are taken from the caller rather than assumed:
 // an endpoint that did not move keeps whatever precision it already had
-// (5 of her spans start approximate and 7 end approximate, from lines in
-// the hand-written log marked "approx", "(est.)" or "midnight" — those
-// feed APPROX_WEIGHT in src/weighted.js). Only an endpoint that is new or
+// (some imported spans start or end approximate, from log lines marked
+// "approx", "(est.)" or "midnight" — those feed APPROX_WEIGHT in
+// src/weighted.js). Only an endpoint that is new or
 // that moved to the edited date becomes 'exact'.
 const span = (start, end, precision, endPrecision) => ({
   start, end, precision, endPrecision, source: EDIT_SOURCE,

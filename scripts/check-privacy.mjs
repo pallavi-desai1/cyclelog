@@ -142,6 +142,8 @@ const INFERENCE_PATTERNS = [
 ];
 
 for (const path of files) {
+  // This file IS the list of banned phrasings, so scanning it finds itself.
+  if (path.endsWith('check-privacy.mjs')) continue;
   const lines = readFileSync(path, 'utf8').split('\n');
   for (const [i, line] of lines.entries()) {
     for (const pattern of INFERENCE_PATTERNS) {

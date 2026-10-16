@@ -220,8 +220,8 @@ describe('setFlow — recording bleeding', () => {
     expect(after.spans).toHaveLength(3);
   });
 
-  // 5 of her real spans start approximate and 7 end approximate — lines in
-  // the hand-written log marked "approx", "(est.)" or "midnight". An
+  // Some imported spans start or end approximate — log lines marked
+  // "approx", "(est.)" or "midnight". An
   // endpoint that does not move under an edit must keep its own precision.
   it('extending forward from a span whose start is approximate keeps that start approximate', () => {
     const approxStart = doc({
