@@ -65,8 +65,11 @@ describe('app wiring', () => {
   });
 
   it('assigns only the renderer output to innerHTML', () => {
+    // Markup reaches the page from the two tested renderers or not at all;
+    // anything else here would be a string built outside their escaping.
+    const allowed = ['renderSummary(openSummary)', 'renderCalendar(grid)', "''"];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
-      expect(['renderSummary(summary)', "''"]).toContain(expression.trim());
+      expect(allowed).toContain(expression.trim());
     }
   });
 
@@ -160,11 +163,13 @@ describe('idle locking', () => {
 
   it('shares one lock-and-clear sequence across every lock site', () => {
     // lock-now, the visibility branch and the timer all return to the lock
-    // screen; a single shared assignment (rather than three inlined copies)
-    // is what the brief's duplication note asked for.
+    // screen through returnToLock(); no other site clears rendered markup, so
+    // there is exactly one place that can forget a pane.
     const text = app();
-    const clears = (text.match(/innerHTML = ''/g) || []).length;
-    expect(clears).toBe(1);
+    const inHelper = (functionBody(text, 'returnToLock').match(/innerHTML = ''/g) || []).length;
+    const everywhere = (text.match(/innerHTML = ''/g) || []).length;
+    expect(inHelper).toBe(2);        // the summary and the calendar
+    expect(everywhere).toBe(inHelper);
   });
 });
 
@@ -275,6 +280,42 @@ describe('an empty vault is not reported as a bad passphrase', () => {
     const body = functionBody(app(), 'unlock');
     const emptyBranch = body.slice(body.indexOf("reason === 'empty'"));
     expect(emptyBranch).toMatch(/screen\('setup'\)/);
+  });
+});
+
+describe('the calendar', () => {
+  it('has its markup and its month controls', () => {
+    for (const id of ['calendar', 'cal-label', 'cal-prev', 'cal-next']) {
+      expect(html(), id).toContain(`id="${id}"`);
+    }
+  });
+
+  it('renders the grid through the tested renderer', () => {
+    expect(app()).toContain('renderCalendar(');
+    expect(app()).toContain('monthGrid(');
+  });
+
+  it('draws the month that contains today on first paint', () => {
+    expect(app()).toMatch(/monthOf\(/);
+  });
+
+  it('steps the month without unlocking or re-reading the vault', () => {
+    const text = app();
+    expect(text).toContain("shiftMonth(");
+    expect(text).toMatch(/cal-prev'\)\.addEventListener/);
+    expect(text).toMatch(/cal-next'\)\.addEventListener/);
+  });
+
+  it('feeds the calendar both predicted dates', () => {
+    const body = functionBody(app(), 'drawCalendar');
+    expect(body, 'drawCalendar').not.toBeNull();
+    expect(body).toMatch(/adaptedDate/);
+    expect(body).toMatch(/baselineDate/);
+  });
+
+  it('clears the grid when the vault locks', () => {
+    const body = functionBody(app(), 'returnToLock');
+    expect(body).toMatch(/calendar'\)\.innerHTML = ''/);
   });
 });
 

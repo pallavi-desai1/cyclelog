@@ -8,7 +8,8 @@ import {
   documentFromSources, emptyDocument, serializeDocument, parseDocument, describeImport,
 } from '../import.js';
 import { buildSummary } from '../summary.js';
-import { renderSummary } from './render.js';
+import { monthGrid, monthOf, shiftMonth } from '../calendar.js';
+import { renderSummary, renderCalendar } from './render.js';
 import { localToday } from '../today.js';
 
 if ('serviceWorker' in navigator) {
@@ -41,7 +42,13 @@ let hasVault = false;
 // summary must not survive any path back to the lock screen.
 function returnToLock() {
   el('summary').innerHTML = '';
+  el('calendar').innerHTML = '';
+  say('cal-label', '');
   say('import-notice', '');
+  // The decrypted document must not outlive the lock (spec §8), and the
+  // calendar is the one place it was being held outside the vault.
+  openDoc = null;
+  openSummary = null;
   // Before any vault exists she is mid-setup, and a hide fires here for
   // ordinary reasons — the file picker, a glance at another app. Switching
   // screens then would strand her on a lock screen for a vault that does not
@@ -53,11 +60,39 @@ function returnToLock() {
 // note is the plain-text import summary from a just-completed setup, or ''
 // on every later unlock. It goes through say() (textContent), never through
 // the HTML the renderer builds, so it cannot smuggle markup into the page.
+// Held only while unlocked, and dropped by returnToLock: the calendar needs
+// the document again on every month step, and re-decrypting per tap would be
+// both slower and no safer.
+let openDoc = null;
+let openSummary = null;
+let viewMonth = null;
+
 function paint(note = '') {
-  const summary = buildSummary(parseDocument(vault.read()), localToday());
-  el('summary').innerHTML = renderSummary(summary);
+  openDoc = parseDocument(vault.read());
+  openSummary = buildSummary(openDoc, localToday());
+  el('summary').innerHTML = renderSummary(openSummary);
   say('import-notice', note);
+  viewMonth = monthOf(localToday());
+  drawCalendar();
   screen('app');
+}
+
+function drawCalendar() {
+  if (openDoc === null || viewMonth === null) return;
+  const grid = monthGrid(openDoc, {
+    month: viewMonth,
+    todayISO: localToday(),
+    adaptedDate: openSummary.adapted.date,
+    baselineDate: openSummary.baseline.date,
+  });
+  say('cal-label', grid.label);
+  el('calendar').innerHTML = renderCalendar(grid);
+}
+
+function stepMonth(delta) {
+  if (viewMonth === null) return;
+  viewMonth = shiftMonth(viewMonth, delta);
+  drawCalendar();
 }
 
 function clear(id) {
@@ -226,6 +261,8 @@ async function start() {
 el('create').addEventListener('click', () => { create(); });
 el('unlock').addEventListener('click', () => { unlock(); });
 el('faceid').addEventListener('click', () => { faceIdUnlock(); });
+el('cal-prev').addEventListener('click', () => { stepMonth(-1); });
+el('cal-next').addEventListener('click', () => { stepMonth(1); });
 el('lock-now').addEventListener('click', () => {
   vault.lock();
   returnToLock();

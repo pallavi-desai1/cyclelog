@@ -1,7 +1,7 @@
 // Bump CACHE_VERSION on every deploy. A stale module served from an old
 // cache is the one failure mode that would make the app lie about her data,
 // so activation deletes every cache that is not this one.
-const CACHE_VERSION = '2';
+const CACHE_VERSION = '3';
 const CACHE_NAME = `cyclelog-${CACHE_VERSION}`;
 
 const PRECACHE = [
@@ -25,6 +25,7 @@ const PRECACHE = [
   'src/weighted.js',
   'src/stats.js',
   'src/summary.js',
+  'src/calendar.js',
   'src/importers/clue.js',
   'src/importers/legacy.js',
   'src/import.js',

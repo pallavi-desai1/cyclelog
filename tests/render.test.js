@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildSummary } from '../src/summary.js';
-import { escapeHtml, renderSummary } from '../src/ui/render.js';
+import { escapeHtml, renderSummary, renderCalendar } from '../src/ui/render.js';
+import { monthGrid } from '../src/calendar.js';
 
 const spans = () => [
   { start: '2015-01-01', end: null, source: 'test' },
@@ -139,5 +140,104 @@ describe('the summary card', () => {
       const closes = (html.match(/<\//g) ?? []).length;
       expect(opens).toBe(closes);
     }
+  });
+});
+
+describe('the calendar', () => {
+  const grid = (overrides = {}) => monthGrid(
+    {
+      version: 1, gaps: [], birthControl: [],
+      spans: overrides.spans ?? [{ start: '2015-03-26', end: '2015-03-30', source: 'test' }],
+      days: overrides.days ?? {
+        '2015-03-26': { flow: 'heavy', spotting: null, pms: false },
+        '2015-03-27': { flow: 'light', spotting: 'brown', pms: false },
+        '2015-03-20': { flow: null, spotting: null, pms: true },
+      },
+    },
+    {
+      month: overrides.month ?? '2015-03',
+      todayISO: overrides.todayISO ?? '2015-03-26',
+      adaptedDate: overrides.adaptedDate ?? '2015-03-31',
+      baselineDate: overrides.baselineDate ?? '2015-03-29',
+    },
+  );
+  const html = (overrides = {}) => renderCalendar(grid(overrides));
+
+  it('heads the grid with the days of the week', () => {
+    for (const name of ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']) {
+      expect(html()).toContain(name);
+    }
+  });
+
+  it('renders one cell per day of the grid', () => {
+    const cells = (html().match(/class="cal-cell/g) ?? []).length;
+    expect(cells).toBe(grid().weeks.length * 7);
+  });
+
+  it('shows every day number of the month', () => {
+    for (const day of [1, 15, 26, 31]) {
+      expect(html()).toMatch(new RegExp(`>${day}<`));
+    }
+  });
+
+  it('distinguishes days outside the month', () => {
+    expect(html({ month: '2015-04', todayISO: '2015-04-01' })).toContain('cal-out');
+  });
+
+  it('marks today', () => {
+    expect(html()).toContain('cal-today');
+  });
+
+  it('scales the flow dot by intensity', () => {
+    expect(html()).toContain('flow-heavy');
+    expect(html()).toContain('flow-light');
+  });
+
+  it('rings a spotting day instead of filling it', () => {
+    expect(html()).toContain('cal-spotting');
+  });
+
+  it('underlines a PMS day', () => {
+    expect(html()).toContain('cal-pms');
+  });
+
+  // §10.3: the adapted prediction is solid, the counterfactual dashed. They
+  // must be separate classes, or the two become indistinguishable in CSS.
+  it('marks the prediction and the counterfactual with different classes', () => {
+    expect(html()).toContain('cal-predicted');
+    expect(html()).toContain('cal-baseline');
+  });
+
+  it('can mark both on a single day', () => {
+    const both = html({ adaptedDate: '2015-03-31', baselineDate: '2015-03-31' });
+    expect(both).toMatch(/class="[^"]*cal-predicted[^"]*cal-baseline|class="[^"]*cal-baseline[^"]*cal-predicted/);
+  });
+
+  // Every state encoded by colour or shape is also encoded in words, so the
+  // calendar survives colour blindness and a screen reader.
+  it('names each state in the cell label', () => {
+    const labels = html().match(/aria-label="[^"]*"/g).join(' ');
+    expect(labels).toMatch(/heavy flow/);
+    expect(labels).toMatch(/spotting/);
+    expect(labels).toMatch(/PMS/);
+    expect(labels).toMatch(/period expected/);
+    expect(labels).toMatch(/without birth control/);
+    expect(labels).toMatch(/today/);
+  });
+
+  it('escapes what was logged rather than injecting it', () => {
+    const nasty = html({ days: { '2015-03-26': { flow: '<img src=x>', spotting: null, pms: false } } });
+    expect(nasty).not.toContain('<img');
+  });
+
+  it('prints no null, undefined or NaN', () => {
+    expect(html({ days: {}, spans: [] })).not.toMatch(/null|undefined|NaN/);
+  });
+
+  it('produces balanced markup', () => {
+    const output = html();
+    const opens = (output.match(/<(?!\/)[a-z]/g) ?? []).length;
+    const closes = (output.match(/<\//g) ?? []).length;
+    expect(opens).toBe(closes);
   });
 });

@@ -119,6 +119,7 @@ button[hidden] { display: none; }
 .value {
   color: var(--text);
   font-weight: 600;
+  font-family: var(--font-body);
 }
 
 /* Spec §10.3: the adapted prediction reads as a solid line, the
@@ -141,3 +142,98 @@ button[hidden] { display: none; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Typography. No @font-face and no @import: the CSP forbids every external
+   host, so these are faces iOS and macOS already ship. The script face
+   carries the headings; figures stay in the body face, because a looping
+   numeral is where "28" becomes "23" at an appointment. */
+:root {
+  --font-body: Palatino, 'Hoefler Text', 'Iowan Old Style', Georgia, serif;
+  --font-script: 'Snell Roundhand', 'Savoye LET', 'Apple Chancery', cursive;
+}
+
+body { font-family: var(--font-body); }
+
+h1, h2, h3 {
+  font-family: var(--font-script);
+  font-weight: 700;          /* these faces are thin; bold keeps them legible */
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+}
+
+h1 { font-size: 2.1em; }
+h2 { font-size: 1.7em; }
+
+input { font-family: var(--font-body); }
+
+/* The month grid (§10.2: beneath the summary card). Flow is a filled dot
+   scaled by intensity, spotting a ring, PMS an underline, and a predicted day
+   an outline — solid for the adapted prediction, dashed for the
+   counterfactual, so the two never rely on colour to be told apart. */
+.calendar { margin-top: var(--gap); }
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.cal-head h3 { margin: 0; font-size: 1.5em; }
+
+.cal-head button {
+  width: var(--tap);
+  min-width: var(--tap);
+  margin: 0;
+  font-size: 1.3em;
+  line-height: 1;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-top: var(--gap);
+}
+
+.cal-weekday {
+  text-align: center;
+  font-size: 0.78em;
+  letter-spacing: 0.04em;
+  color: var(--heading);
+}
+
+.cal-cell {
+  position: relative;
+  min-height: var(--tap);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.cal-out { opacity: 0.38; }
+
+.cal-today { background: var(--border); font-weight: 700; }
+
+.cal-day { font-size: 0.9em; font-family: var(--font-body); }
+
+.cal-dot { display: block; border-radius: 50%; }
+
+.flow-light { width: 6px; height: 6px; background: var(--flow-light); }
+.flow-medium { width: 9px; height: 9px; background: var(--flow-medium); }
+.flow-heavy { width: 12px; height: 12px; background: var(--flow-heavy); }
+
+.cal-spotting { box-shadow: inset 0 0 0 2px var(--spotting); }
+
+.cal-pms { text-decoration: underline 2px var(--warning); text-underline-offset: 2px; }
+
+.cal-predicted { border: 2px solid var(--interactive); }
+
+/* An outline rather than a border, so a day that is both predicted and the
+   counterfactual shows both marks at once. */
+.cal-baseline { outline: 2px dashed var(--baseline); outline-offset: 2px; }

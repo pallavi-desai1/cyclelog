@@ -23,6 +23,26 @@ function precacheList() {
   return match[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
 }
 
+
+// Comments stripped first, so a class named only in prose does not count as a
+// styled selector.
+const cssRules = () => css().replace(/\/\*[\s\S]*?\*\//g, '');
+
+function hasSelector(selector) {
+  const name = selector.replace(/^\./, '');
+  return new RegExp(`(^|[\\s,}])\\.${name}(?=[\\s,.:{])`).test(cssRules());
+}
+
+// The declaration block of the first rule whose selector list mentions the
+// class — enough to assert on a property's value.
+function ruleBody(selector) {
+  const name = selector.replace(/^\./, '');
+  const match = new RegExp(
+    `(^|[\\s,}])\\.${name}(?=[\\s,.:{])[^{}]*\\{([^}]*)\\}`,
+  ).exec(cssRules());
+  return match === null ? '' : match[2];
+}
+
 describe('content security policy', () => {
   const policy = () => html().match(/content="([^"]*default-src[^"]*)"/)[1];
 
@@ -247,6 +267,64 @@ describe('dark-mode button contrast', () => {
       }
     }
     expect(found, 'a dark-mode button rule overriding color away from white').toBe(true);
+  });
+});
+
+describe('typography', () => {
+  // No web fonts: the CSP forbids every external host, so the script face has
+  // to be one the device already has.
+  it('names only fonts the device ships with', () => {
+    // Rules, not comments: the point is that nothing is fetched.
+    expect(cssRules()).not.toMatch(/@font-face|@import|url\(/);
+  });
+
+  it('defines a script face and a readable body face as tokens', () => {
+    expect(css()).toMatch(/--font-script:/);
+    expect(css()).toMatch(/--font-body:/);
+  });
+
+  it('uses a real script face available on iOS', () => {
+    const script = css().match(/--font-script:([^;]*);/)[1];
+    expect(script).toMatch(/Snell Roundhand|Savoye LET|Apple Chancery/);
+    expect(script).toMatch(/cursive/);
+  });
+
+  it('keeps figures in the readable face, not the script one', () => {
+    // Dates and counts are read aloud at an appointment; a looping numeral is
+    // where "28" becomes "23".
+    for (const selector of ['.value', '.cal-day']) {
+      const rule = ruleBody(selector);
+      expect(rule, selector).toMatch(/var\(--font-body\)/);
+    }
+  });
+});
+
+describe('calendar styling', () => {
+  it('styles every class the calendar renderer emits', () => {
+    for (const selector of [
+      '.cal-grid', '.cal-weekday', '.cal-cell', '.cal-out', '.cal-today',
+      '.cal-dot', '.flow-light', '.flow-medium', '.flow-heavy',
+      '.cal-spotting', '.cal-pms', '.cal-predicted', '.cal-baseline',
+    ]) {
+      expect(hasSelector(selector), selector).toBe(true);
+    }
+  });
+
+  it('draws the counterfactual dashed against a solid prediction outline', () => {
+    expect(ruleBody('.cal-predicted')).toMatch(/solid/);
+    expect(ruleBody('.cal-baseline')).toMatch(/dashed/);
+  });
+
+  it('scales the flow dot by intensity', () => {
+    const sizes = ['.flow-light', '.flow-medium', '.flow-heavy']
+      .map(selector => ruleBody(selector).match(/width:\s*([\d.]+)/)[1])
+      .map(Number);
+    expect(sizes[0]).toBeLessThan(sizes[1]);
+    expect(sizes[1]).toBeLessThan(sizes[2]);
+  });
+
+  it('keeps tap targets usable in the grid', () => {
+    expect(ruleBody('.cal-cell')).toMatch(/min-height/);
   });
 });
 
