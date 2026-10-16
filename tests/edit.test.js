@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { EDIT_SOURCE, setDayFields, setFlow, setApproximate, spanCovering } from '../src/edit.js';
+import {
+  EDIT_SOURCE, setDayFields, setFlow, setApproximate, spanCovering, applyDayEdit,
+} from '../src/edit.js';
 
 const doc = (overrides = {}) => ({
   version: 1, days: {}, spans: [], gaps: [], birthControl: [], ...overrides,
@@ -344,5 +346,59 @@ describe('setFlow — taking bleeding back', () => {
   it('marks a span it edited as manual, so a re-import cannot undo her', () => {
     const after = setFlow(threeDay(), '2015-03-01', null);
     expect(after.spans[0].source).toBe(EDIT_SOURCE);
+  });
+});
+
+describe('applyDayEdit', () => {
+  const emptyEdit = () => ({
+    flow: null,
+    approximate: false,
+    patch: {
+      cramps: null, spotting: null, discharge: null, pms: false,
+      mood: [], pain: [], tests: { ovulation: null, pregnancy: null }, notes: '',
+    },
+  });
+
+  // Review Focus 2 / Critical 1 (final branch review): 48 of her 110 real
+  // periods have no day entries behind them. Opening any of their days and
+  // saving without changing anything must not move spans at all — the form
+  // cannot tell "she left it alone" from "she cleared it" from the unchecked
+  // flow radio alone. applyDayEdit tells them apart by comparing against
+  // what was actually recorded before, which setFlow alone cannot do.
+  it('leaves an entry-less period entirely alone when every one of its days is opened and saved untouched', () => {
+    const before = imported();
+    let after = before;
+    for (const date of ['2015-01-01', '2015-01-02', '2015-01-03', '2015-01-04', '2015-01-05']) {
+      after = applyDayEdit(after, date, emptyEdit());
+    }
+    expect(after.spans).toEqual(before.spans);
+  });
+
+  // The reviewer's reproduction included a one-day period vanishing
+  // entirely (spans: []) — the same bug, smallest case.
+  it('leaves a one-day, entry-less period alone the same way', () => {
+    const before = doc({
+      spans: [{
+        start: '2015-06-01', end: '2015-06-01', precision: 'exact', endPrecision: 'exact', source: 'legacy',
+      }],
+    });
+    const after = applyDayEdit(before, '2015-06-01', emptyEdit());
+    expect(after.spans).toEqual(before.spans);
+  });
+
+  // The guard must not mask a real edit: clearing a flow that WAS recorded
+  // is a genuine change and must still shrink the span it belongs to.
+  it('still moves the spans when she deliberately clears a flow that was actually recorded', () => {
+    const before = imported();
+    const after = applyDayEdit(before, '2015-01-29', emptyEdit());
+    expect(after.spans).not.toEqual(before.spans);
+    expect(spanCovering(after.spans, '2015-01-29')).toBeNull();
+  });
+
+  it('still writes the rest of the patch on an untouched-flow save', () => {
+    const before = imported();
+    const after = applyDayEdit(before, '2015-01-01', { ...emptyEdit(), patch: { ...emptyEdit().patch, notes: 'fine' } });
+    expect(after.days['2015-01-01'].notes).toBe('fine');
+    expect(after.spans).toEqual(before.spans);
   });
 });

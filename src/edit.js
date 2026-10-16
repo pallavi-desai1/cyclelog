@@ -148,3 +148,21 @@ export function setFlow(doc, dateISO, flow) {
     : addToSpans(doc.spans, dateISO);
   return { ...withFlow, spans };
 }
+
+// Composes the three edits exactly as a save applies them, with one guard
+// `setFlow` cannot provide on its own: `flow` only moves spans when it
+// actually changed. A day with no entry has no flow radio checked, so the
+// form reports `flow: null` whether she left it alone or deliberately
+// cleared it — and routing an untouched save through setFlow unconditionally
+// reads a never-recorded flow as a removal, splitting or shrinking whatever
+// period silently covers that day (Review Focus 2: 48 of her 110 periods
+// have no day entries behind them, so this is not a corner case for her).
+// A deliberate clear still moves the spans correctly, because `existingFlow`
+// is non-null in that case and therefore differs from `null`.
+export function applyDayEdit(doc, dateISO, { flow, patch, approximate }) {
+  const existingFlow = doc.days[dateISO]?.flow ?? null;
+  let next = setDayFields(doc, dateISO, patch);
+  if (flow !== existingFlow) next = setFlow(next, dateISO, flow);
+  next = setApproximate(next, dateISO, approximate);
+  return next;
+}

@@ -13,7 +13,7 @@ import { dayDetail } from '../day.js';
 import { renderSummary, renderCalendar, renderDay } from './render.js';
 import { localToday } from '../today.js';
 import { addDays } from '../dates.js';
-import { setDayFields, setFlow, setApproximate } from '../edit.js';
+import { applyDayEdit } from '../edit.js';
 import { renderEditor, patchFromValues, saveOutcome } from './editor.js';
 
 if ('serviceWorker' in navigator) {
@@ -230,10 +230,10 @@ async function saveDay() {
   const epoch = sessionEpoch;
   const session = editSession;
   try {
-    const { flow, patch, approximate } = patchFromValues(formValues());
-    let next = setDayFields(openDoc, date, patch);
-    next = setFlow(next, date, flow);
-    next = setApproximate(next, date, approximate);
+    // applyDayEdit (src/edit.js) only moves the flow's span when the flow
+    // actually changed — an untouched save on a day with no entry must not
+    // read its unchecked flow radio as a deliberate clear.
+    const next = applyDayEdit(openDoc, date, patchFromValues(formValues()));
 
     // The vault is the authority. Nothing in the view adopts the new document
     // until the encrypted write has resolved, so a failed save leaves her

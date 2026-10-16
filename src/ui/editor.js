@@ -80,7 +80,10 @@ export function renderEditor(detail) {
     `<h3>${escapeHtml(detail.label)}</h3>`,
     `<fieldset><legend>Bleeding</legend>`,
     `<label class="edit-check"><input type="radio" name="flow" value="">`,
-    `None</label>${radios}</fieldset>`,
+    // "None" would mean the same thing on screen as "nothing was ever
+    // recorded here" — exactly the conflation that let an untouched save
+    // on an entry-less day erase a real period (see applyDayEdit).
+    `Not recorded</label>${radios}</fieldset>`,
     select('edit-cramps', 'Cramps', CRAMP_OPTIONS, recorded(detail, 'Cramps')),
     select('edit-spotting', 'Spotting', SPOTTING_OPTIONS, recorded(detail, 'Spotting')),
     select('edit-discharge', 'Discharge', DISCHARGE_OPTIONS, recorded(detail, 'Discharge')),

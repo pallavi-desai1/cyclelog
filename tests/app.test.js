@@ -408,11 +408,20 @@ describe('editing a day', () => {
     expect(app()).toContain('patchFromValues(');
   });
 
-  it('writes flow through setFlow, which keeps the periods intact', () => {
+  // Critical 1 (final review): saveDay used to call setDayFields/setFlow
+  // directly, calling setFlow unconditionally even when the flow had not
+  // changed — which read an untouched save on an entry-less day as a
+  // deliberate clear and corrupted the period it fell inside (48 of her 110
+  // real periods have no day entries behind them). applyDayEdit (src/edit.js,
+  // tested directly in tests/edit.test.js) is the guarded composition;
+  // saveDay must delegate to it rather than re-implementing the guard itself
+  // where no test here could exercise it.
+  it('composes the edit through the guarded, tested applyDayEdit rather than the raw functions', () => {
     const body = functionBody(app(), 'saveDay');
     expect(body, 'saveDay').not.toBeNull();
-    expect(body).toMatch(/setFlow\(/);
-    expect(body).toMatch(/setDayFields\(/);
+    expect(body).toMatch(/applyDayEdit\(/);
+    expect(body).not.toMatch(/\bsetFlow\(/);
+    expect(body).not.toMatch(/\bsetDayFields\(/);
   });
 
   it('persists through the vault rather than writing storage directly', () => {
