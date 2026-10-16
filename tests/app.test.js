@@ -73,6 +73,7 @@ describe('app wiring', () => {
       'renderCalendar(grid)',
       "''",
       'renderDay(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
+      'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
       expect(allowed).toContain(squash(expression));
@@ -388,5 +389,60 @@ describe('the ghost cadence starts at the anchor', () => {
     const body = functionBody(app(), 'ghostDatesFor');
     expect(body).toMatch(/baseline\.anchor/);
     expect(body).not.toMatch(/anchor \?\?/);
+  });
+});
+
+describe('editing a day', () => {
+  it('offers an edit button on the day panel', () => {
+    // index.html holds only the empty #day-detail container — every day's
+    // markup, this button included, comes from renderDay() in render.js.
+    const render = () => readFileSync(join(root, 'src/ui/render.js'), 'utf8');
+    expect(render()).toContain('id="edit-day"');
+  });
+
+  it('renders the form through the tested renderer', () => {
+    expect(app()).toContain('renderEditor(');
+  });
+
+  it('builds the patch through the tested function', () => {
+    expect(app()).toContain('patchFromValues(');
+  });
+
+  it('writes flow through setFlow, which keeps the periods intact', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body, 'saveDay').not.toBeNull();
+    expect(body).toMatch(/setFlow\(/);
+    expect(body).toMatch(/setDayFields\(/);
+  });
+
+  it('persists through the vault rather than writing storage directly', () => {
+    expect(functionBody(app(), 'saveDay')).toMatch(/vault\.save\(/);
+    expect(functionBody(app(), 'saveDay')).toMatch(/serializeDocument\(/);
+  });
+
+  // Review Focus 1: a failed save must never look like a successful one.
+  it('keeps the form open and says so when the save fails', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body).toMatch(/catch/);
+    expect(body).toMatch(/edit-error/);
+  });
+
+  it('only adopts the new document after the save resolves', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body.indexOf('await vault.save')).toBeLessThan(body.indexOf('openDoc = '));
+  });
+
+  it('re-renders the card and the grid from the saved document', () => {
+    expect(functionBody(app(), 'saveDay')).toMatch(/paint\(|drawCalendar\(/);
+  });
+
+  it('drops a draft when the vault locks', () => {
+    expect(functionBody(app(), 'returnToLock')).toMatch(/editing = null/);
+  });
+
+  it('guards the save button against a second tap', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body).toMatch(/disabled/);
+    expect(body).toMatch(/finally/);
   });
 });

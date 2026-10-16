@@ -224,6 +224,7 @@ export function renderDay(detail) {
     parts.push(`<p class="day-source">${provenance.join(', ')}</p>`);
   }
 
+  parts.push('<button id="edit-day" type="button">Edit this day</button>');
   parts.push('</section>');
   return parts.join('');
 }

@@ -492,3 +492,15 @@ describe('a day that both bled and was a ghost', () => {
     expect(ruleBody('.cal-baseline')).toMatch(/dashed/);
   });
 });
+
+describe('editor styling', () => {
+  it('styles the form and its controls', () => {
+    for (const selector of ['.editor', '.edit-check', '.secondary']) {
+      expect(hasSelector(selector), selector).toBe(true);
+    }
+  });
+
+  it('keeps the checkboxes at a usable tap size', () => {
+    expect(ruleBody('.edit-check')).toMatch(/min-height/);
+  });
+});

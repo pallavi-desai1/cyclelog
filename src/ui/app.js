@@ -13,6 +13,8 @@ import { dayDetail } from '../day.js';
 import { renderSummary, renderCalendar, renderDay } from './render.js';
 import { localToday } from '../today.js';
 import { addDays } from '../dates.js';
+import { setDayFields, setFlow, setApproximate } from '../edit.js';
+import { renderEditor, patchFromValues } from './editor.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -52,6 +54,10 @@ function returnToLock() {
   // calendar is the one place it was being held outside the vault.
   openDoc = null;
   openSummary = null;
+  // The editing draft lives only in the DOM the lock screen is about to
+  // replace, but the flag that says "a form is open" is state in this
+  // module, and must not survive to the next unlock.
+  editing = null;
   // Before any vault exists she is mid-setup, and a hide fires here for
   // ordinary reasons — the file picker, a glance at another app. Switching
   // screens then would strand her on a lock screen for a vault that does not
@@ -70,6 +76,11 @@ let openDoc = null;
 let openSummary = null;
 let viewMonth = null;
 let selectedDate = null;
+
+// The date currently open in the editor, or null when the day panel is
+// showing its read-only view instead. Cleared by returnToLock, by a
+// successful save, and by Cancel.
+let editing = null;
 
 function paint(note = '') {
   openDoc = parseDocument(vault.read());
@@ -132,6 +143,66 @@ function selectDay(date) {
     adaptedDate: openSummary.adapted.date,
     baselineDates: ghostDatesFor(monthOf(date)),
   }));
+}
+
+function openEditor(date) {
+  if (openDoc === null) return;
+  editing = date;
+  el('day-detail').innerHTML = renderEditor(dayDetail(openDoc, date, {
+    todayISO: localToday(),
+    adaptedDate: openSummary.adapted.date,
+    baselineDates: ghostDatesFor(monthOf(date)),
+  }));
+}
+
+// Reads the form the editor rendered. The DOM is the only place these values
+// exist, so this function is the boundary: everything it returns goes
+// straight into patchFromValues, which is pure and tested.
+function formValues() {
+  const checked = name => [...document.querySelectorAll(`input[name="${name}"]:checked`)]
+    .map(input => input.value);
+  const flow = checked('flow');
+  return {
+    flow: flow.length === 0 ? '' : flow[0],
+    cramps: el('edit-cramps').value,
+    spotting: el('edit-spotting').value,
+    discharge: el('edit-discharge').value,
+    pms: el('edit-pms').checked,
+    mood: checked('mood'),
+    pain: checked('pain'),
+    ovulation: el('edit-ovulation').value,
+    pregnancy: el('edit-pregnancy').value,
+    notes: el('edit-notes').value,
+    approximate: el('edit-approx').checked,
+  };
+}
+
+async function saveDay() {
+  if (editing === null || el('edit-save').disabled) return;
+  el('edit-save').disabled = true;
+  const date = editing;
+  try {
+    const { flow, patch, approximate } = patchFromValues(formValues());
+    let next = setDayFields(openDoc, date, patch);
+    next = setFlow(next, date, flow);
+    next = setApproximate(next, date, approximate);
+
+    // The vault is the authority. Nothing in the view adopts the new document
+    // until the encrypted write has resolved, so a failed save leaves her
+    // looking at what is actually stored.
+    await vault.save(serializeDocument(next));
+    openDoc = next;
+    openSummary = buildSummary(openDoc, localToday());
+    el('summary').innerHTML = renderSummary(openSummary);
+    drawCalendar();
+    editing = null;
+    selectDay(date);
+  } catch {
+    say('edit-error', 'That did not save. Your entry is still here — try again.');
+  } finally {
+    const button = el('edit-save');
+    if (button !== null) button.disabled = false;
+  }
 }
 
 function stepMonth(delta) {
@@ -311,6 +382,17 @@ el('faceid').addEventListener('click', () => { faceIdUnlock(); });
 el('calendar').addEventListener('click', event => {
   const cell = event.target.closest('[data-date]');
   if (cell !== null) selectDay(cell.dataset.date);
+});
+// The panel and the form are both re-rendered, so these are delegated from
+// the container that survives rather than attached to elements that get
+// replaced.
+el('day-detail').addEventListener('click', event => {
+  if (event.target.id === 'edit-day' && selectedDate !== null) openEditor(selectedDate);
+  if (event.target.id === 'edit-save') saveDay();
+  if (event.target.id === 'edit-cancel' && selectedDate !== null) {
+    editing = null;
+    selectDay(selectedDate);
+  }
 });
 el('cal-prev').addEventListener('click', () => { stepMonth(-1); });
 el('cal-next').addEventListener('click', () => { stepMonth(1); });
