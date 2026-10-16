@@ -29,9 +29,11 @@ describe('the option lists', () => {
     expect(CRAMP_OPTIONS.map(option => option.value)).toContain('unknown');
   });
 
+  // Spec §2's scale is none/mild/moderate/severe — 'strong' was never the
+  // right word.
   it('offers a real cramp scale as well', () => {
     const values = CRAMP_OPTIONS.map(option => option.value);
-    for (const value of ['none', 'mild', 'moderate', 'strong']) expect(values).toContain(value);
+    for (const value of ['none', 'mild', 'moderate', 'severe']) expect(values).toContain(value);
   });
 
   it('covers every mood her imported data uses', () => {
@@ -141,6 +143,41 @@ describe('renderEditor', () => {
     const opens = (output.match(/<(?!\/)[a-z]/g) ?? []).length - selfClosing;
     expect(opens).toBe((output.match(/<\//g) ?? []).length);
   });
+
+  // Important 6 (final review): this is the discharge bug's mechanism, not
+  // just its instance — any field fed by the open-ended Clue vocabulary
+  // (src/importers/clue.js passes option strings through verbatim) can
+  // carry a value none of these option lists know about. Before this fix,
+  // select() marked nothing selected and checkboxes() didn't render the
+  // value at all, so opening the day and saving replaced it with null/
+  // silently dropped it.
+  it('keeps an unrecognised recorded value selectable rather than silently dropping it', () => {
+    const odd = {
+      ...doc,
+      days: { '2015-03-01': { ...doc.days['2015-03-01'], discharge: 'mysterious' } },
+    };
+    const output = renderEditor(dayDetail(odd, '2015-03-01', { todayISO: '2015-03-10' }));
+    expect(output).toMatch(/<option value="mysterious" selected>mysterious<\/option>/);
+  });
+
+  it('keeps an unrecognised recorded mood checked rather than silently dropping it', () => {
+    const odd = {
+      ...doc,
+      days: { '2015-03-01': { ...doc.days['2015-03-01'], mood: ['giddy'] } },
+    };
+    const output = renderEditor(dayDetail(odd, '2015-03-01', { todayISO: '2015-03-10' }));
+    expect(output).toMatch(/value="giddy"[^>]*checked/);
+    expect(output).toContain('>giddy<');
+  });
+
+  it('escapes an unrecognised value rather than letting it become markup', () => {
+    const odd = {
+      ...doc,
+      days: { '2015-03-01': { ...doc.days['2015-03-01'], discharge: '<img src=x>' } },
+    };
+    const output = renderEditor(dayDetail(odd, '2015-03-01', { todayISO: '2015-03-10' }));
+    expect(output).not.toContain('<img');
+  });
 });
 
 describe('patchFromValues', () => {
@@ -221,12 +258,12 @@ describe('saveOutcome', () => {
     })).toBe('abandon');
   });
 
-  // A locked session wins even when the editor session token still happens
-  // to match: the lock is what makes the decrypted document unsafe to hold,
-  // regardless of which editor was open when it fired.
-  it('abandons on a moved epoch even when the session token still matches', () => {
+  // A lock wins even when the session token has ALSO moved: 'abandon' must
+  // be checked and returned before 'adopt-only' is ever considered, not
+  // merely produce the same answer by coincidence when only the epoch moved.
+  it('abandons on a moved epoch even when the session token has moved too', () => {
     expect(saveOutcome({
-      epochAtStart: 1, epochNow: 2, sessionAtStart: 1, sessionNow: 1,
+      epochAtStart: 1, epochNow: 2, sessionAtStart: 1, sessionNow: 2,
     })).toBe('abandon');
   });
 

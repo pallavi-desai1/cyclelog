@@ -11,7 +11,7 @@ export const FLOW_OPTIONS = [
 // saved without quietly inventing an intensity she never gave.
 export const CRAMP_OPTIONS = [
   option('none', 'None'), option('mild', 'Mild'), option('moderate', 'Moderate'),
-  option('strong', 'Strong'), option('unknown', 'Unspecified'),
+  option('severe', 'Severe'), option('unknown', 'Unspecified'),
 ];
 
 export const SPOTTING_OPTIONS = [
@@ -49,9 +49,18 @@ const recordedList = (detail, label) => {
   return value === '' ? [] : value.split(', ');
 };
 
+// The Clue importer passes option strings through verbatim (src/importers/
+// clue.js), so the vocabulary is open-ended by construction: a value this
+// list has never heard of is not a bug in the data, and opening the day
+// must not be what erases it. An unrecognised, non-empty `current` gets an
+// extra option appended, selected, labelled with the raw value — honest
+// beats pretty here, and it is exactly the same shape the discharge bug
+// already was.
 function select(id, name, options, current) {
+  const known = current === '' || options.some(option => option.value === current);
+  const withUnknown = known ? options : [...options, option(current, current)];
   const choices = [`<option value=""${current === '' ? ' selected' : ''}>—</option>`]
-    .concat(options.map(({ value, label }) => (
+    .concat(withUnknown.map(({ value, label }) => (
       `<option value="${escapeHtml(value)}"${value === current ? ' selected' : ''}>`
       + `${escapeHtml(label)}</option>`
     )))
@@ -60,7 +69,9 @@ function select(id, name, options, current) {
 }
 
 function checkboxes(group, legend, options, current) {
-  const boxes = options.map(({ value, label }) => (
+  const known = options.map(opt => opt.value);
+  const unknown = current.filter(value => !known.includes(value)).map(value => option(value, value));
+  const boxes = [...options, ...unknown].map(({ value, label }) => (
     `<label class="edit-check"><input type="checkbox" name="${group}"`
     + ` value="${escapeHtml(value)}"${current.includes(value) ? ' checked' : ''}>`
     + `${escapeHtml(label)}</label>`
