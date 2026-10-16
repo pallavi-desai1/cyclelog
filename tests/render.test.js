@@ -158,7 +158,7 @@ describe('the calendar', () => {
       month: overrides.month ?? '2015-03',
       todayISO: overrides.todayISO ?? '2015-03-26',
       adaptedDate: overrides.adaptedDate ?? '2015-03-31',
-      baselineDate: overrides.baselineDate ?? '2015-03-29',
+      baselineDates: overrides.baselineDates ?? ['2015-03-29'],
     },
   );
   const html = (overrides = {}) => renderCalendar(grid(overrides));
@@ -209,7 +209,7 @@ describe('the calendar', () => {
   });
 
   it('can mark both on a single day', () => {
-    const both = html({ adaptedDate: '2015-03-31', baselineDate: '2015-03-31' });
+    const both = html({ adaptedDate: '2015-03-31', baselineDates: ['2015-03-31'] });
     expect(both).toMatch(/class="[^"]*cal-predicted[^"]*cal-baseline|class="[^"]*cal-baseline[^"]*cal-predicted/);
   });
 
@@ -322,6 +322,68 @@ describe('the day panel', () => {
 
   it('produces balanced markup', () => {
     const html = renderDay(detail());
+    expect((html.match(/<(?!\/)[a-z]/g) ?? []).length).toBe((html.match(/<\//g) ?? []).length);
+  });
+});
+
+describe('calendar colour coding', () => {
+  const grid = (days, options = {}) => monthGrid(
+    { version: 1, gaps: [], birthControl: [], spans: options.spans ?? [], days },
+    { month: '2015-03', todayISO: '2015-03-10', ...options },
+  );
+
+  it('fills a bleeding day by intensity', () => {
+    const html = renderCalendar(grid({
+      '2015-03-02': { flow: 'light' },
+      '2015-03-03': { flow: 'medium' },
+      '2015-03-04': { flow: 'heavy' },
+    }));
+    expect(html).toContain('cal-flow-light');
+    expect(html).toContain('cal-flow-medium');
+    expect(html).toContain('cal-flow-heavy');
+  });
+
+  it('fills a period day whose intensity was never recorded', () => {
+    const html = renderCalendar(grid({}, {
+      spans: [{ start: '2015-03-02', end: '2015-03-04', source: 'test' }],
+    }));
+    expect(html).toContain('cal-flow-medium');
+  });
+
+  it('marks a positive test', () => {
+    const html = renderCalendar(grid({
+      '2015-03-05': { tests: { ovulation: 'positive', pregnancy: null } },
+    }));
+    expect(html).toContain('cal-test');
+  });
+
+  it('carries a legend naming every colour', () => {
+    const html = renderCalendar(grid({}));
+    for (const label of [
+      'Light', 'Medium', 'Heavy', 'Spotting', 'PMS', 'Positive test',
+      'Period expected', 'Would have been',
+    ]) {
+      expect(html).toContain(label);
+    }
+  });
+
+  it('gives each legend swatch the class of the cells it explains', () => {
+    const legend = renderCalendar(grid({})).match(/<ul class="cal-legend">[\s\S]*<\/ul>/)[0];
+    for (const className of [
+      'cal-flow-light', 'cal-flow-heavy', 'cal-spotting', 'cal-pms',
+      'cal-test', 'cal-predicted', 'cal-baseline',
+    ]) {
+      expect(legend, className).toContain(className);
+    }
+  });
+
+  it('marks every counterfactual day of the month, not just one', () => {
+    const html = renderCalendar(grid({}, { baselineDates: ['2015-03-05', '2015-03-26'] }));
+    expect((html.match(/cal-baseline/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('still balances its markup with the legend attached', () => {
+    const html = renderCalendar(grid({ '2015-03-02': { flow: 'heavy' } }));
     expect((html.match(/<(?!\/)[a-z]/g) ?? []).length).toBe((html.match(/<\//g) ?? []).length);
   });
 });

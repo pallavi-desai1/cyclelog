@@ -260,3 +260,61 @@ input { font-family: var(--font-body); }
 .day h3 { margin-bottom: 6px; }
 .day-empty { opacity: 0.7; margin: 0; }
 .day-source { font-size: 0.85em; opacity: 0.7; margin: 8px 0 0; }
+
+/* Colour coding, so a month reads at a glance. Every fill below is also
+   named in the cell's aria-label and in the legend, and every one of these
+   states additionally carries a shape — a dot, a ring, an underline, an
+   outline — so none of it depends on hue alone. */
+.cal-flow-light { background: var(--flow-light); }
+.cal-flow-medium { background: var(--flow-medium); }
+.cal-flow-heavy { background: var(--flow-heavy); color: #FFFFFF; }
+
+/* Her words: white for where the period would have been. A hollow cell
+   against the filled real ones, ringed in dashed lavender. */
+.cal-baseline { background: #FFFFFF; }
+
+.cal-spotting { background: #F3E3DC; }
+
+.cal-pms { box-shadow: inset 0 -4px 0 var(--warning); }
+
+/* A positive test: a teal corner pip, distinct in hue from the pink family
+   so it never reads as bleeding. */
+.cal-test::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--positive);
+}
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: var(--gap) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8em;
+}
+
+.cal-legend li { display: flex; align-items: center; gap: 5px; }
+
+.cal-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background: var(--surface);
+  position: relative;
+}
+
+@media (prefers-color-scheme: dark) {
+  /* The ghost stays hollow rather than literally white, which would glare. */
+  .cal-baseline { background: var(--surface); }
+  .cal-spotting { background: #3A2A24; }
+  .cal-flow-light { color: var(--text); }
+}

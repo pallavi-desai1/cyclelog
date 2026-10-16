@@ -111,21 +111,55 @@ function cellLabel(cell) {
   return parts.join(', ');
 }
 
+// Flow arrives from imported data, so it is whitelisted into a class rather
+// than interpolated: an unrecognised value gets the plain period fill
+// instead of a new selector built from whatever the file contained.
+const FILL_CLASS = {
+  light: 'cal-flow-light', medium: 'cal-flow-medium', heavy: 'cal-flow-heavy',
+};
+
 function cellClasses(cell) {
   const classes = ['cal-cell'];
   if (!cell.inMonth) classes.push('cal-out');
   if (cell.isToday) classes.push('cal-today');
-  if (cell.isPeriod) classes.push('cal-period');
+  if (cell.isPeriod) {
+    classes.push('cal-period');
+    // The fill is what makes a month readable at a glance; the dot inside it
+    // repeats the intensity as a shape, for anyone who cannot rely on hue.
+    classes.push(FILL_CLASS[cell.flow] ?? 'cal-flow-medium');
+  } else if (FILL_CLASS[cell.flow]) {
+    // Bleeding recorded on a day no span covers — still bleeding.
+    classes.push('cal-period', FILL_CLASS[cell.flow]);
+  }
   if (cell.pms) classes.push('cal-pms');
   if (cell.spotting) classes.push('cal-spotting');
+  if (cell.testPositive) classes.push('cal-test');
   if (cell.predicted) classes.push('cal-predicted');
   if (cell.baseline) classes.push('cal-baseline');
   return classes.join(' ');
 }
 
-// Flow arrives from imported data, so it is whitelisted into a class rather
-// than interpolated: an unrecognised value gets no dot instead of a new
-// selector built from whatever the file contained.
+// Shown under the grid, because a colour nobody can name is a colour that
+// means nothing. Each swatch carries the same class as the cells it explains,
+// so the legend cannot drift away from the calendar.
+const LEGEND = [
+  ['cal-period cal-flow-light', 'Light'],
+  ['cal-period cal-flow-medium', 'Medium'],
+  ['cal-period cal-flow-heavy', 'Heavy'],
+  ['cal-spotting', 'Spotting'],
+  ['cal-pms', 'PMS'],
+  ['cal-test', 'Positive test'],
+  ['cal-predicted', 'Period expected'],
+  ['cal-baseline', 'Would have been, without birth control'],
+];
+
+function renderLegend() {
+  const items = LEGEND.map(([className, label]) => (
+    `<li><span class="cal-swatch ${className}"></span>${escapeHtml(label)}</li>`
+  )).join('');
+  return `<ul class="cal-legend">${items}</ul>`;
+}
+
 const FLOW_CLASS = { light: 'flow-light', medium: 'flow-medium', heavy: 'flow-heavy' };
 
 function flowDot(cell) {
@@ -151,7 +185,7 @@ export function renderCalendar(grid) {
     + '</button>'
   )).join('');
 
-  return `<div class="cal-grid">${head}${cells}</div>`;
+  return `<div class="cal-grid">${head}${cells}</div>${renderLegend()}`;
 }
 
 // The panel under the calendar: what this day was, where it sits in the

@@ -8,10 +8,11 @@ import {
   documentFromSources, emptyDocument, serializeDocument, parseDocument, describeImport,
 } from '../import.js';
 import { buildSummary } from '../summary.js';
-import { monthGrid, monthOf, shiftMonth } from '../calendar.js';
+import { monthGrid, monthOf, shiftMonth, projectedDates } from '../calendar.js';
 import { dayDetail } from '../day.js';
 import { renderSummary, renderCalendar, renderDay } from './render.js';
 import { localToday } from '../today.js';
+import { addDays } from '../dates.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -81,13 +82,30 @@ function paint(note = '') {
   screen('app');
 }
 
+// Where her period would have fallen in THIS month, not merely the next one
+// — the comparison she asked for only works if the ghost keeps its cadence
+// across every month she looks at. A window slightly wider than the grid
+// covers the padding days at either end.
+function ghostDatesFor(month) {
+  if (!openSummary.baseline.available) return [];
+  // No `?? baseline.date` fallback: projecting from the next ghost instead of
+  // the anchor silently drops every month before it, which is most of the
+  // comparison. A missing anchor means no cadence, not a different one.
+  return projectedDates(
+    openSummary.baseline.anchor,
+    openSummary.baseline.length,
+    addDays(`${month}-01`, -10),
+    addDays(`${month}-01`, 45),
+  );
+}
+
 function drawCalendar() {
   if (openDoc === null || viewMonth === null) return;
   const grid = monthGrid(openDoc, {
     month: viewMonth,
     todayISO: localToday(),
     adaptedDate: openSummary.adapted.date,
-    baselineDate: openSummary.baseline.date,
+    baselineDates: ghostDatesFor(viewMonth),
   });
   say('cal-label', grid.label);
   el('calendar').innerHTML = renderCalendar(grid);
@@ -112,7 +130,7 @@ function selectDay(date) {
   el('day-detail').innerHTML = renderDay(dayDetail(openDoc, date, {
     todayISO: localToday(),
     adaptedDate: openSummary.adapted.date,
-    baselineDate: openSummary.baseline.date,
+    baselineDates: ghostDatesFor(monthOf(date)),
   }));
 }
 

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { WEEKDAYS, monthOf, shiftMonth, monthLabel, monthGrid } from '../src/calendar.js';
+import {
+  WEEKDAYS, MAX_PROJECTED, monthOf, shiftMonth, monthLabel, monthGrid, projectedDates,
+} from '../src/calendar.js';
+import { addDays } from '../src/dates.js';
 
 const doc = (overrides = {}) => ({
   version: 1,
@@ -171,7 +174,7 @@ describe('what was logged on a day', () => {
 describe('predictions on the grid', () => {
   const options = {
     month: '2015-04', todayISO: '2015-04-01',
-    adaptedDate: '2015-04-23', baselineDate: '2015-04-20',
+    adaptedDate: '2015-04-23', baselineDates: ['2015-04-20'],
   };
 
   it('marks the adapted prediction', () => {
@@ -192,7 +195,7 @@ describe('predictions on the grid', () => {
 
   it('marks both on one day when they coincide', () => {
     const grid = monthGrid(doc(), {
-      ...options, adaptedDate: '2015-04-23', baselineDate: '2015-04-23',
+      ...options, adaptedDate: '2015-04-23', baselineDates: ['2015-04-23'],
     });
     const cell = cellFor(grid, '2015-04-23');
     expect(cell.predicted).toBe(true);
@@ -211,5 +214,101 @@ describe('predictions on the grid', () => {
     const cell = cellFor(grid, '2015-04-01');
     expect(cell.inMonth).toBe(false);
     expect(cell.predicted).toBe(true);
+  });
+});
+
+describe('projectedDates — the counterfactual cadence', () => {
+  it('returns the ghost dates that fall inside a window', () => {
+    // 28-day cadence anchored on 1 January.
+    expect(projectedDates('2015-01-01', 28, '2015-01-01', '2015-03-31'))
+      .toEqual(['2015-01-01', '2015-01-29', '2015-02-26', '2015-03-26']);
+  });
+
+  it('includes a date on either boundary', () => {
+    expect(projectedDates('2015-01-01', 28, '2015-01-29', '2015-02-26'))
+      .toEqual(['2015-01-29', '2015-02-26']);
+  });
+
+  it('returns nothing for a window before the anchor', () => {
+    expect(projectedDates('2015-06-01', 28, '2015-01-01', '2015-05-31')).toEqual([]);
+  });
+
+  it('returns nothing for a window between two occurrences', () => {
+    expect(projectedDates('2015-01-01', 28, '2015-01-05', '2015-01-20')).toEqual([]);
+  });
+
+  // The bug this pins has been found twice in this codebase: rounding each
+  // step and adding them accumulates error, while multiplying first and
+  // rounding once does not. Over three years it is a fortnight adrift.
+  it('multiplies before rounding, so it does not drift over years', () => {
+    const dates = projectedDates('2015-01-01', 28.4, '2015-01-01', '2017-12-31');
+    const accumulated = [];
+    let walk = '2015-01-01';
+    for (let i = 0; i < dates.length; i++) {
+      accumulated.push(walk);
+      walk = addDays(walk, Math.round(28.4));
+    }
+    expect(dates[dates.length - 1]).not.toBe(accumulated[accumulated.length - 1]);
+    // 39 cycles of 28.4 days from 1 Jan 2015 lands on day round(38 * 28.4).
+    expect(dates[38]).toBe(addDays('2015-01-01', Math.round(38 * 28.4)));
+  });
+
+  it('refuses a length that is not a positive number', () => {
+    expect(projectedDates('2015-01-01', 0, '2015-01-01', '2015-12-31')).toEqual([]);
+    expect(projectedDates('2015-01-01', null, '2015-01-01', '2015-12-31')).toEqual([]);
+  });
+
+  it('refuses a missing anchor', () => {
+    expect(projectedDates(null, 28, '2015-01-01', '2015-12-31')).toEqual([]);
+  });
+
+  it('stops at a cap rather than looping forever on a tiny length', () => {
+    const dates = projectedDates('2015-01-01', 0.4, '2015-01-01', '2099-12-31');
+    expect(dates.length).toBeLessThanOrEqual(MAX_PROJECTED);
+  });
+});
+
+describe('the counterfactual across a whole month', () => {
+  const grid = (baselineDates) => monthGrid(doc(), {
+    month: '2015-03', todayISO: '2015-03-10', baselineDates,
+  });
+
+  it('marks every ghost date given, not just the next one', () => {
+    const marked = flat(grid(['2015-03-05', '2015-03-26']))
+      .filter(cell => cell.baseline).map(cell => cell.date);
+    expect(marked).toEqual(['2015-03-05', '2015-03-26']);
+  });
+
+  it('marks none when the cadence is unknown', () => {
+    expect(flat(grid([])).some(cell => cell.baseline)).toBe(false);
+  });
+});
+
+describe('positive tests on the grid', () => {
+  const tested = doc({
+    days: {
+      '2015-03-05': { tests: { ovulation: 'positive', pregnancy: null } },
+      '2015-03-06': { tests: { ovulation: null, pregnancy: 'positive' } },
+      '2015-03-07': { tests: { ovulation: 'negative', pregnancy: 'negative' } },
+      '2015-03-08': { flow: 'light' },
+    },
+  });
+  const grid = () => monthGrid(tested, { month: '2015-03', todayISO: '2015-03-10' });
+
+  it('marks a positive ovulation test', () => {
+    expect(cellFor(grid(), '2015-03-05').testPositive).toBe(true);
+  });
+
+  it('marks a positive pregnancy test', () => {
+    expect(cellFor(grid(), '2015-03-06').testPositive).toBe(true);
+  });
+
+  it('does not mark a negative one', () => {
+    expect(cellFor(grid(), '2015-03-07').testPositive).toBe(false);
+  });
+
+  it('does not mark a day with no test at all', () => {
+    expect(cellFor(grid(), '2015-03-08').testPositive).toBe(false);
+    expect(cellFor(grid(), '2015-03-09').testPositive).toBe(false);
   });
 });

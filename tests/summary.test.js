@@ -227,3 +227,21 @@ describe('the whole summary', () => {
     expect(JSON.parse(JSON.stringify(summary)).lastPeriod.start).toBe('2015-03-26');
   });
 });
+
+describe('the baseline anchor', () => {
+  it('is exposed, so the calendar can project the cadence across any month', () => {
+    const { baseline } = buildSummary(doc(SUPPRESS), '2015-07-15');
+    expect(baseline.anchor).toBe('2015-03-26');
+  });
+
+  it('is null when there is no usable natural-cycle history', () => {
+    const thin = { version: 1, days: {}, spans: [], gaps: [], birthControl: [] };
+    expect(buildSummary(thin, '2015-07-15').baseline.anchor).toBeNull();
+  });
+
+  it('is the last pre-birth-control period start, not the next projection', () => {
+    const { baseline } = buildSummary(doc(SUPPRESS), '2015-07-15');
+    expect(baseline.anchor).not.toBe(baseline.date);
+    expect(baseline.anchor < baseline.date).toBe(true);
+  });
+});

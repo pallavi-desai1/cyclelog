@@ -85,6 +85,10 @@ export function buildSummary(doc, todayISO) {
     baseline: {
       available: baseline.available,
       date: baseline.available ? baseline.date : null,
+      // The last pre-birth-control period start. The calendar projects the
+      // counterfactual cadence from here, so it can answer "when would my
+      // period have been" for a month in the past as well as the next one.
+      anchor: baseline.available ? baseline.anchor : null,
       confidence: baseline.available ? baseline.confidence : null,
       length: baseline.available ? baseline.length : null,
       sigma: baseline.available ? baseline.sigma : null,

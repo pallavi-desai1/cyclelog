@@ -161,7 +161,7 @@ describe('context for the day', () => {
   });
 
   it('marks the counterfactual day separately', () => {
-    const detail = on('2015-03-24', { baselineDate: '2015-03-24' });
+    const detail = on('2015-03-24', { baselineDates: ['2015-03-24'] });
     expect(detail.baseline).toBe(true);
     expect(detail.predicted).toBe(false);
   });

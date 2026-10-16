@@ -72,7 +72,7 @@ describe('app wiring', () => {
       'renderSummary(openSummary)',
       'renderCalendar(grid)',
       "''",
-      'renderDay(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDate: openSummary.baseline.date, }))',
+      'renderDay(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
       expect(allowed).toContain(squash(expression));
@@ -316,7 +316,7 @@ describe('the calendar', () => {
     const body = functionBody(app(), 'drawCalendar');
     expect(body, 'drawCalendar').not.toBeNull();
     expect(body).toMatch(/adaptedDate/);
-    expect(body).toMatch(/baselineDate/);
+    expect(body).toMatch(/baselineDates/);
   });
 
   it('clears the grid when the vault locks', () => {
@@ -360,5 +360,33 @@ describe('tapping a day', () => {
 
   it('keeps the selected day across a month step', () => {
     expect(functionBody(app(), 'stepMonth')).not.toMatch(/selectedDate = null/);
+  });
+});
+
+describe('the counterfactual across every month', () => {
+  it('projects the ghost cadence for the month on screen', () => {
+    const body = functionBody(app(), 'ghostDatesFor');
+    expect(body, 'ghostDatesFor').not.toBeNull();
+    expect(body).toMatch(/projectedDates\(/);
+    expect(body).toMatch(/baseline\.length/);
+  });
+
+  it('says nothing when there is no usable natural-cycle history', () => {
+    expect(functionBody(app(), 'ghostDatesFor')).toMatch(/baseline\.available/);
+  });
+
+  it('feeds the same cadence to the grid and the day panel', () => {
+    expect(functionBody(app(), 'drawCalendar')).toMatch(/ghostDatesFor\(/);
+    expect(functionBody(app(), 'selectDay')).toMatch(/ghostDatesFor\(/);
+  });
+});
+
+describe('the ghost cadence starts at the anchor', () => {
+  // A `?? baseline.date` fallback here would project from the next ghost
+  // instead of the anchor, silently dropping every month before it.
+  it('uses the anchor with no silent fallback', () => {
+    const body = functionBody(app(), 'ghostDatesFor');
+    expect(body).toMatch(/baseline\.anchor/);
+    expect(body).not.toMatch(/anchor \?\?/);
   });
 });

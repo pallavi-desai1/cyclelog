@@ -37,7 +37,7 @@ function loggedItems(entry) {
 }
 
 export function dayDetail(doc, dateISO, {
-  todayISO, adaptedDate = null, baselineDate = null,
+  todayISO, adaptedDate = null, baselineDates = [],
 }) {
   const entry = (doc.days ?? {})[dateISO] ?? null;
   const span = spanCovering(doc, dateISO);
@@ -68,6 +68,6 @@ export function dayDetail(doc, dateISO, {
       : { method: episode.method, startedOn: episode.startedOn },
 
     predicted: adaptedDate !== null && dateISO === adaptedDate,
-    baseline: baselineDate !== null && dateISO === baselineDate,
+    baseline: baselineDates.includes(dateISO),
   };
 }
