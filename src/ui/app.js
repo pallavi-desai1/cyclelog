@@ -1,4 +1,4 @@
-import { indexedDbBackend } from '../store.js';
+import { indexedDbBackend, readMeta, VAULT_KEY } from '../store.js';
 import { createVault } from '../unlock.js';
 import {
   biometricSupported, enrollBiometric, biometricKey,
@@ -8,6 +8,10 @@ import {
   documentFromSources, emptyDocument, serializeDocument, parseDocument, describeImport,
 } from '../import.js';
 import { buildSummary } from '../summary.js';
+import { buildCycles } from '../cycles.js';
+import {
+  FILENAMES, backupBundle, documentJson, daysCsv, cyclesCsv,
+} from '../export.js';
 import {
   monthGrid, monthOf, shiftMonth, projectedDates, monthRange, clampMonth,
 } from '../calendar.js';
@@ -361,6 +365,60 @@ function jumpToPickedMonth() {
   closePicker();
 }
 
+// Spec §9: a Blob, never a network call. The link is created, clicked and
+// revoked in one go, so nothing is left holding the data.
+function download(filename, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+// The encrypted backup needs no warning: it is unreadable without her
+// passphrase, which is why it says so inside the file.
+async function exportBackup() {
+  if (openDoc === null) return;
+  try {
+    const meta = await readMeta(backend);
+    const vault = await backend.get(VAULT_KEY);
+    download(
+      FILENAMES.backup,
+      backupBundle({ meta, vault, exportedAt: localToday() }),
+      'application/json',
+    );
+  } catch {
+    say('export-error', 'That download did not start. Please try again.');
+  }
+}
+
+// Spec §9: plaintext leaves the encrypted store only behind an explicit
+// warning that names what is about to happen.
+function exportPlaintext(kind) {
+  if (openDoc === null) return;
+  const ok = window.confirm(
+    'This file is NOT encrypted. Anything that reads it — any app, anyone with '
+    + 'the phone or the folder you save it to — can read your whole history. '
+    + 'Save it somewhere you trust. Continue?',
+  );
+  if (!ok) return;
+
+  try {
+    if (kind === 'data') {
+      download(FILENAMES.data, documentJson(openDoc), 'application/json');
+    } else if (kind === 'days') {
+      download(FILENAMES.days, daysCsv(openDoc), 'text/csv');
+    } else {
+      download(FILENAMES.cycles, cyclesCsv(buildCycles(openDoc)), 'text/csv');
+    }
+  } catch {
+    say('export-error', 'That download did not start. Please try again.');
+  }
+}
+
 function goToToday() {
   if (openDoc === null) return;
   // The same rule the calendar cells follow: navigation must not destroy a
@@ -593,6 +651,10 @@ el('cal-label').addEventListener('click', () => { togglePicker(); });
 el('cal-picker').addEventListener('change', event => {
   if (event.target.id === 'cal-month' || event.target.id === 'cal-year') jumpToPickedMonth();
 });
+el('export-backup').addEventListener('click', () => { exportBackup(); });
+el('export-data').addEventListener('click', () => { exportPlaintext('data'); });
+el('export-days').addEventListener('click', () => { exportPlaintext('days'); });
+el('export-cycles').addEventListener('click', () => { exportPlaintext('cycles'); });
 el('cal-today').addEventListener('click', () => { goToToday(); });
 el('cal-prev').addEventListener('click', () => { stepMonth(-1); });
 el('cal-next').addEventListener('click', () => { stepMonth(1); });

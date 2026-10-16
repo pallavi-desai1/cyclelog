@@ -760,3 +760,57 @@ describe('the Today button', () => {
     expect(functionBody(app(), 'goToToday')).toMatch(/openDoc === null/);
   });
 });
+
+describe('export', () => {
+  it('offers all four of the spec outputs', () => {
+    for (const id of ['export-backup', 'export-data', 'export-days', 'export-cycles']) {
+      expect(html(), id).toContain(`id="${id}"`);
+    }
+  });
+
+  it('builds every file through the tested formatters', () => {
+    const text = app();
+    for (const builder of ['backupBundle(', 'documentJson(', 'daysCsv(', 'cyclesCsv(']) {
+      expect(text, builder).toContain(builder);
+    }
+  });
+
+  it('names the files as the spec does, rather than inventing names', () => {
+    expect(app()).toContain('FILENAMES.');
+    expect(app()).not.toMatch(/'cyclelog-[a-z]+\.(json|csv)'/);
+  });
+
+  // Spec §9: a plaintext export is confirmed behind an explicit warning
+  // naming what is about to leave the encrypted store.
+  it('warns before anything plaintext leaves the vault', () => {
+    const body = functionBody(app(), 'exportPlaintext');
+    expect(body, 'exportPlaintext').not.toBeNull();
+    expect(body).toMatch(/confirm\(/);
+    expect(body).toMatch(/not encrypted|unencrypted|plain text/i);
+  });
+
+  it('does not warn for the encrypted backup, which needs no warning', () => {
+    expect(functionBody(app(), 'exportBackup')).not.toMatch(/confirm\(/);
+  });
+
+  it('reads the sealed blob and the key material straight from the store', () => {
+    const body = functionBody(app(), 'exportBackup');
+    expect(body).toMatch(/readMeta\(/);
+    expect(body).toMatch(/VAULT_KEY/);
+  });
+
+  it('downloads through a Blob, with no network anywhere in it', () => {
+    const body = functionBody(app(), 'download');
+    expect(body, 'download').not.toBeNull();
+    expect(body).toMatch(/new Blob\(/);
+    expect(body).toMatch(/createObjectURL/);
+    expect(body).toMatch(/revokeObjectURL/);
+    expect(body).not.toMatch(/fetch\(|XMLHttpRequest|\.send\(/);
+  });
+
+  it('does nothing while the vault is locked', () => {
+    for (const fn of ['exportBackup', 'exportPlaintext']) {
+      expect(functionBody(app(), fn), fn).toMatch(/openDoc === null|status\(\)/);
+    }
+  });
+});
