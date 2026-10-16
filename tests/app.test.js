@@ -446,48 +446,67 @@ describe('editing a day', () => {
     expect(body).toMatch(/finally/);
   });
 
-  // Critical 1 (review): vault.save awaits two IndexedDB round trips
-  // (seal(), then backend.set()). A lock firing in that window must not let
-  // the continuation repaint the summary, calendar and day panel on top of
-  // the lock screen once the save resolves.
+  // Critical 1 (review, round 1): vault.save awaits two IndexedDB round
+  // trips (seal(), then backend.set()). A lock firing in that window must
+  // not let the continuation bring the decrypted document back into memory
+  // or repaint the summary, calendar and day panel on top of the lock
+  // screen once the save resolves.
   it('bumps the session epoch on every path back to the lock screen', () => {
     expect(functionBody(app(), 'returnToLock')).toMatch(/sessionEpoch \+= 1/);
   });
 
-  // Critical 1 & 2 (review): the epoch/editing check has to run after the
-  // await (it is reading state that may have changed while the write was in
-  // flight) and before openDoc is reassigned (nothing may be adopted on a
-  // stale session).
-  it('checks the session is still current after the await and before adopting the result', () => {
-    const body = functionBody(app(), 'saveDay');
-    const awaitIndex = body.indexOf('await vault.save');
-    const guardIndex = body.indexOf('isCurrentSession(');
-    const adoptIndex = body.indexOf('openDoc = ');
-    expect(awaitIndex).toBeGreaterThan(-1);
-    expect(guardIndex).toBeGreaterThan(awaitIndex);
-    expect(adoptIndex).toBeGreaterThan(guardIndex);
+  // Critical 2 (review, round 2): the epoch means "the vault locked", full
+  // stop. Opening a different editor mid-save is a separate event — the
+  // save in flight still needs to land in memory, which bumping this same
+  // counter there would have prevented. One counter, one meaning.
+  it('does not bump the session epoch when a fresh editor opens — only a lock does', () => {
+    expect(functionBody(app(), 'openEditor')).not.toMatch(/sessionEpoch/);
   });
 
-  // Critical 2 (review): the button's `disabled` attribute is not a lock —
-  // Cancel/openEditor re-render the panel and hand out a brand-new, enabled
-  // button while an earlier save is still pending. A real flag at module
-  // scope is what actually serialises concurrent saves.
+  // Critical 2 (review, round 2): the data-loss mechanism after round 1's
+  // fix was that openDoc was only resynced when the save was still the
+  // visible session — so a superseded save's write landed in the vault but
+  // never in memory, and the next save computed `next` from that stale
+  // base and overwrote it. openDoc must be assigned on every outcome except
+  // 'abandon' (the vault locked, so memory must stay null), and specifically
+  // before the 'adopt-only' check that decides whether to also repaint.
+  it('updates memory on an abandoned-screen save too, before deciding whether to repaint', () => {
+    const body = functionBody(app(), 'saveDay');
+    const abandonIndex = body.indexOf("outcome === 'abandon'");
+    const openDocIndex = body.indexOf('openDoc = next;');
+    const adoptOnlyIndex = body.indexOf("outcome === 'adopt-only'");
+    expect(abandonIndex, "the 'abandon' check").toBeGreaterThan(-1);
+    expect(openDocIndex, 'openDoc = next;').toBeGreaterThan(abandonIndex);
+    expect(adoptOnlyIndex, "the 'adopt-only' check").toBeGreaterThan(openDocIndex);
+  });
+
+  it('decides with the pure, tested saveOutcome function rather than its own logic', () => {
+    expect(functionBody(app(), 'saveDay')).toMatch(/saveOutcome\(/);
+  });
+
+  // Critical 2 (review, round 2): the button's `disabled` attribute is not a
+  // lock — Cancel/openEditor re-render the panel and hand out a brand-new,
+  // enabled button while an earlier save is still pending. A real flag at
+  // module scope is what actually serialises concurrent saves.
   it('serialises saves with a real in-flight flag, not just the button attribute', () => {
     const body = functionBody(app(), 'saveDay');
-    expect(body).toMatch(/if \(editing === null \|\| saveInFlight\) return;/);
     expect(body).toMatch(/saveInFlight = true;/);
     expect(body).toMatch(/finally\s*\{[\s\S]*saveInFlight = false;[\s\S]*\}/);
   });
 
-  // Critical 2 (review): opening a fresh editor — even for the same day, even
-  // after Cancel — must invalidate any save still pending from whatever was
-  // open before it, so that save's continuation cannot reach back in and
-  // stomp what she is now typing.
-  it('bumps the session epoch whenever a fresh editor is opened', () => {
-    expect(functionBody(app(), 'openEditor')).toMatch(/sessionEpoch \+= 1/);
+  // Critical 2 follow-up (review, round 2): round 1's in-flight flag made a
+  // tap during a pending save a dead click — it returned with no message and
+  // no visible change. The block must say so instead of doing nothing.
+  it('tells her when a tap is blocked because a save is already in flight', () => {
+    const body = functionBody(app(), 'saveDay');
+    const guardIndex = body.indexOf('if (saveInFlight)');
+    expect(guardIndex, 'the saveInFlight guard').toBeGreaterThan(-1);
+    const guardBlock = body.slice(guardIndex, body.indexOf('saveInFlight = true;'));
+    expect(guardBlock).toMatch(/edit-error/);
+    expect(guardBlock).toMatch(/errorField !== null/);
   });
 
-  // Critical 2 (review): before this fix, the failure branch called
+  // Critical 2 (review, round 1): before this fix, the failure branch called
   // say('edit-error', ...), which assumes the element exists. #edit-error
   // can be gone by the time a stale save's catch runs (a later re-render
   // replaced the panel), and a throw inside a catch is worse than the

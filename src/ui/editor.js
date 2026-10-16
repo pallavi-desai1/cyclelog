@@ -124,12 +124,20 @@ export function patchFromValues(values) {
   };
 }
 
-// A save is only still "current" if nothing moved the session out from under
-// it while its write was in flight: the lock screen was not shown (the
-// epoch bumps on every lock and on every fresh openEditor call), and the
-// editor it was launched from is still the one open. A save that fails this
-// check already landed in the vault correctly — the vault is the authority,
-// never rolled back — this only decides whether the *view* may adopt it.
-export function isCurrentSession({ epochAtStart, epochNow, editing, date }) {
-  return epochAtStart === epochNow && editing === date;
+// A save's write to the vault always lands — one seal(), one whole-document
+// write, never a merge. What varies is what the *view* may do once it does,
+// and that needs three answers, not two:
+//   - 'abandon': the vault locked while the write was in flight. The epoch
+//     (bumped only by returnToLock) moved, so the decrypted document must
+//     not come back into memory at all; the next unlock reads it fresh.
+//   - 'adopt-only': the vault did not lock, but a different day (or none) is
+//     open now. The vault holds `next`, so memory must too, or the next
+//     save would compute from a stale base and silently overwrite this
+//     one's write — but her screen belongs to another day and must not
+//     repaint.
+//   - 'adopt-and-render': nothing moved. Memory and the screen both update.
+export function saveOutcome({ epochAtStart, epochNow, editing, date }) {
+  if (epochAtStart !== epochNow) return 'abandon';
+  if (editing !== date) return 'adopt-only';
+  return 'adopt-and-render';
 }

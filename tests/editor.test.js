@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   FLOW_OPTIONS, CRAMP_OPTIONS, MOOD_OPTIONS, PAIN_OPTIONS,
   SPOTTING_OPTIONS, DISCHARGE_OPTIONS, TEST_OPTIONS,
-  renderEditor, patchFromValues, isCurrentSession,
+  renderEditor, patchFromValues, saveOutcome,
 } from '../src/ui/editor.js';
 import { dayDetail } from '../src/day.js';
 
@@ -202,32 +202,40 @@ describe('patchFromValues', () => {
 });
 
 // vault.save awaits two IndexedDB round trips (seal(), then backend.set()),
-// so the session can move on — a lock, or a fresh editor opened over the
-// same or a different day — before a pending save resolves. The write
-// already landed in the vault and is never rolled back; this function only
-// decides whether the *view* may still act on it once it does.
-describe('isCurrentSession', () => {
-  it('adopts when the epoch has not moved and the same day is still open', () => {
-    expect(isCurrentSession({
+// so the session can move on — a lock, or a different day opened in the
+// editor — before a pending save resolves. The write always lands in the
+// vault; this function only decides what the *view* may do once it has.
+describe('saveOutcome', () => {
+  it('renders when the epoch has not moved and the same day is still open', () => {
+    expect(saveOutcome({
       epochAtStart: 1, epochNow: 1, editing: '2015-03-01', date: '2015-03-01',
-    })).toBe(true);
+    })).toBe('adopt-and-render');
   });
 
-  it('does not adopt once the epoch has moved — a lock or a fresh editor fired', () => {
-    expect(isCurrentSession({
+  it('abandons once the epoch has moved — the vault locked mid-save', () => {
+    expect(saveOutcome({
       epochAtStart: 1, epochNow: 2, editing: '2015-03-01', date: '2015-03-01',
-    })).toBe(false);
+    })).toBe('abandon');
   });
 
-  it('does not adopt when a different day is open now', () => {
-    expect(isCurrentSession({
+  // A locked session wins even when the editing date still happens to
+  // match: the lock is what makes the decrypted document unsafe to hold,
+  // regardless of which day was open when it fired.
+  it('abandons on a moved epoch even when the editing date still matches', () => {
+    expect(saveOutcome({
+      epochAtStart: 1, epochNow: 2, editing: '2015-03-01', date: '2015-03-01',
+    })).toBe('abandon');
+  });
+
+  it('adopts into memory only, without rendering, when a different day is open now', () => {
+    expect(saveOutcome({
       epochAtStart: 1, epochNow: 1, editing: '2015-03-02', date: '2015-03-01',
-    })).toBe(false);
+    })).toBe('adopt-only');
   });
 
-  it('does not adopt once the editor has been cancelled', () => {
-    expect(isCurrentSession({
+  it('adopts into memory only when the editor was cancelled (editing is null)', () => {
+    expect(saveOutcome({
       epochAtStart: 1, epochNow: 1, editing: null, date: '2015-03-01',
-    })).toBe(false);
+    })).toBe('adopt-only');
   });
 });

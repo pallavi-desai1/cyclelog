@@ -14,7 +14,7 @@ import { renderSummary, renderCalendar, renderDay } from './render.js';
 import { localToday } from '../today.js';
 import { addDays } from '../dates.js';
 import { setDayFields, setFlow, setApproximate } from '../edit.js';
-import { renderEditor, patchFromValues, isCurrentSession } from './editor.js';
+import { renderEditor, patchFromValues, saveOutcome } from './editor.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -87,10 +87,12 @@ let selectedDate = null;
 // successful save, and by Cancel.
 let editing = null;
 
-// Bumped on every lock and on every fresh openEditor call, so a save whose
-// write resolves after either event can tell its own session is stale. The
-// vault write it made is still correct and final; this only gates whether
-// the view may act on it afterwards.
+// A pure lock generation: bumped only by returnToLock, never by opening a
+// new editor. A save whose write resolves after a lock can tell the
+// decrypted document must not come back into memory at all — the next
+// unlock reads it fresh. Opening a different editor mid-save is a separate
+// case (see saveOutcome/'adopt-only'): memory still needs the write, so it
+// must not share this counter.
 let sessionEpoch = 0;
 
 // A real lock on saveDay itself, not just the button's `disabled` attribute:
@@ -164,12 +166,11 @@ function selectDay(date) {
 
 function openEditor(date) {
   if (openDoc === null) return;
+  // `editing` alone is what a pending save checks to see whether its day is
+  // still the one open (see saveOutcome in editor.js). Opening a different
+  // editor is not a lock — the save in flight still needs to land in
+  // memory — so the lock-generation counter stays untouched here.
   editing = date;
-  // A fresh editor is a fresh session: any save still pending from whatever
-  // was open before this must not reach back in and adopt its document once
-  // this form (possibly for a different day, possibly typed into already)
-  // is the one on screen.
-  sessionEpoch += 1;
   el('day-detail').innerHTML = renderEditor(dayDetail(openDoc, date, {
     todayISO: localToday(),
     adaptedDate: openSummary.adapted.date,
@@ -200,9 +201,19 @@ function formValues() {
 }
 
 async function saveDay() {
-  if (editing === null || saveInFlight) return;
+  if (editing === null) return;
+  if (saveInFlight) {
+    // A freshly re-rendered Save button is enabled again even while an
+    // earlier save for this same day is still pending — the disabled
+    // attribute does not survive a re-render, only this flag does. A tap
+    // that lands in that window must say so rather than silently doing
+    // nothing.
+    const errorField = document.getElementById('edit-error');
+    if (errorField !== null) errorField.textContent = 'Still saving — one moment.';
+    return;
+  }
   saveInFlight = true;
-  const button = el('edit-save');
+  const button = document.getElementById('edit-save');
   if (button !== null) button.disabled = true;
   const date = editing;
   const epoch = sessionEpoch;
@@ -217,23 +228,29 @@ async function saveDay() {
     // looking at what is actually stored.
     await vault.save(serializeDocument(next));
 
-    // The write above can take two IndexedDB round trips. A lock or a fresh
-    // openEditor call can land in that window — the write already happened
-    // and is correct, but this session is no longer the one on screen, and
-    // must not reach back in and repaint over whatever replaced it.
-    if (!isCurrentSession({ epochAtStart: epoch, epochNow: sessionEpoch, editing, date })) return;
+    const outcome = saveOutcome({ epochAtStart: epoch, epochNow: sessionEpoch, editing, date });
+    // Locked while we were saving: the write landed and is correct, but the
+    // decrypted document must not come back into memory. The next unlock
+    // reads it from the vault.
+    if (outcome === 'abandon') return;
 
+    // The vault now holds `next`, so memory must too — whether or not this
+    // is still the visible session. Skipping this is what let a later save
+    // compute from a stale base and overwrite what this one just wrote.
     openDoc = next;
     openSummary = buildSummary(openDoc, localToday());
+    if (outcome === 'adopt-only') return; // her screen belongs to another day; leave it alone
+
     el('summary').innerHTML = renderSummary(openSummary);
     drawCalendar();
     editing = null;
     selectDay(date);
   } catch {
-    if (!isCurrentSession({ epochAtStart: epoch, epochNow: sessionEpoch, editing, date })) return;
-    // el() is not used here: the panel that held #edit-error may already
-    // have been replaced by a later openEditor/selectDay call, and a missing
-    // element must not throw inside a catch.
+    // A failed save never reached the vault, so there is nothing for memory
+    // to adopt — only whether this is still the visible form, to decide
+    // whether writing to #edit-error would land on the right panel at all.
+    const outcome = saveOutcome({ epochAtStart: epoch, epochNow: sessionEpoch, editing, date });
+    if (outcome !== 'adopt-and-render') return;
     const errorField = document.getElementById('edit-error');
     if (errorField !== null) {
       errorField.textContent = 'That did not save. Your entry is still here — try again.';
