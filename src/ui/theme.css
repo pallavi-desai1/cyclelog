@@ -346,3 +346,52 @@ input { font-family: var(--font-body); }
   /* The ghost stays hollow rather than literally white, which would glare. */
   .cal-baseline:not(.cal-period) { background: var(--surface); }
 }
+
+/* The day editor. Controls inherit the global input/button styling; these
+   rules cover the form's own layout. */
+.editor { margin-top: var(--gap); }
+
+.editor fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0 0 var(--gap);
+  padding: 8px 12px 12px;
+}
+
+.editor legend { color: var(--heading); padding: 0 4px; }
+
+.editor label[for] { display: block; margin-bottom: 4px; }
+
+.editor select, .editor textarea {
+  font: inherit;
+  width: 100%;
+  min-height: var(--tap);
+  margin-bottom: var(--gap);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.edit-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap);
+  margin-right: 12px;
+}
+
+.edit-check input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+}
+
+.secondary {
+  background: var(--surface);
+  color: var(--heading);
+  border: 1px solid var(--border);
+}
+
+#edit-error { color: var(--warning); margin: 0; min-height: 1.45em; }

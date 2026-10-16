@@ -29,6 +29,26 @@ function functionBody(text, name) {
   return null;
 }
 
+// Extracts the balanced-brace block immediately following `marker` (which
+// must end just before the opening `{`) — for checking what IS and is NOT
+// inside a specific nested `if { ... }`, rather than searching the first
+// occurrence of a token (like `return;`) anywhere in the enclosing function,
+// which can land on an earlier, unrelated guard.
+function balancedBlockAfter(text, marker) {
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex === -1) return null;
+  const braceStart = text.indexOf('{', markerIndex);
+  let depth = 0;
+  for (let i = braceStart; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) return text.slice(braceStart, i + 1);
+    }
+  }
+  return null;
+}
+
 describe('index.html first-run markup', () => {
   it('has the setup screen the app drives', () => {
     for (const id of [
@@ -73,6 +93,7 @@ describe('app wiring', () => {
       'renderCalendar(grid)',
       "''",
       'renderDay(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
+      'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
       expect(allowed).toContain(squash(expression));
@@ -196,8 +217,11 @@ describe('setup robustness', () => {
     // throw inside offerFaceId (now caught there, but the ordering itself
     // matters) would have skipped paint() entirely, leaving the setup screen
     // up over an already-created vault.
+    // paint() is awaited now (Important 7, final review): it itself awaits
+    // any pendingSave before reading, and must stay inside create()'s try
+    // so a parseDocument throw there is still caught there.
     const body = functionBody(app(), 'create');
-    expect(body).toMatch(/await offerFaceId\(\);\s*(\/\/[^\n]*\n\s*)*paint\(importNote\);/);
+    expect(body).toMatch(/await offerFaceId\(\);\s*(\/\/[^\n]*\n\s*)*await paint\(importNote\);/);
   });
 
   it('shows the Face ID button immediately on successful enrolment, not only on next start()', () => {
@@ -388,5 +412,306 @@ describe('the ghost cadence starts at the anchor', () => {
     const body = functionBody(app(), 'ghostDatesFor');
     expect(body).toMatch(/baseline\.anchor/);
     expect(body).not.toMatch(/anchor \?\?/);
+  });
+});
+
+describe('editing a day', () => {
+  it('offers an edit button on the day panel', () => {
+    // index.html holds only the empty #day-detail container — every day's
+    // markup, this button included, comes from renderDay() in render.js.
+    const render = () => readFileSync(join(root, 'src/ui/render.js'), 'utf8');
+    expect(render()).toContain('id="edit-day"');
+  });
+
+  it('renders the form through the tested renderer', () => {
+    expect(app()).toContain('renderEditor(');
+  });
+
+  it('builds the patch through the tested function', () => {
+    expect(app()).toContain('patchFromValues(');
+  });
+
+  // Critical 1 (final review): saveDay used to call setDayFields/setFlow
+  // directly, calling setFlow unconditionally even when the flow had not
+  // changed — which read an untouched save on an entry-less day as a
+  // deliberate clear and corrupted the period it fell inside. applyDayEdit
+  // (src/edit.js, tested directly in tests/edit.test.js) is the guarded
+  // composition; saveDay must delegate to it rather than re-implementing
+  // the guard itself where no test here could exercise it.
+  it('composes the edit through the guarded, tested applyDayEdit rather than the raw functions', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body, 'saveDay').not.toBeNull();
+    expect(body).toMatch(/applyDayEdit\(/);
+    expect(body).not.toMatch(/\bsetFlow\(/);
+    expect(body).not.toMatch(/\bsetDayFields\(/);
+  });
+
+  it('persists through the vault rather than writing storage directly', () => {
+    expect(functionBody(app(), 'saveDay')).toMatch(/vault\.save\(/);
+    expect(functionBody(app(), 'saveDay')).toMatch(/serializeDocument\(/);
+  });
+
+  // Review Focus 1: a failed save must never look like a successful one.
+  it('keeps the form open and says so when the save fails', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body).toMatch(/catch/);
+    expect(body).toMatch(/edit-error/);
+  });
+
+  it('only adopts the new document after the save resolves', () => {
+    // The write is issued as vault.save(...) and awaited separately as
+    // `await writePromise;` (so pendingSave can hold the same promise for
+    // paint() to wait on) — that second line is the actual await point.
+    const body = functionBody(app(), 'saveDay');
+    expect(body.indexOf('vault.save(')).toBeGreaterThan(-1);
+    expect(body.indexOf('await writePromise;')).toBeLessThan(body.indexOf('openDoc = '));
+  });
+
+  it('re-renders the card and the grid from the saved document', () => {
+    expect(functionBody(app(), 'saveDay')).toMatch(/paint\(|drawCalendar\(/);
+  });
+
+  it('drops a draft when the vault locks', () => {
+    expect(functionBody(app(), 'returnToLock')).toMatch(/editing = null/);
+  });
+
+  it('guards the save button against a second tap', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body).toMatch(/disabled/);
+    expect(body).toMatch(/finally/);
+  });
+
+  // Critical 1 (review, round 1): vault.save awaits two IndexedDB round
+  // trips (seal(), then backend.set()). A lock firing in that window must
+  // not let the continuation bring the decrypted document back into memory
+  // or repaint the summary, calendar and day panel on top of the lock
+  // screen once the save resolves.
+  it('bumps the session epoch on every path back to the lock screen', () => {
+    expect(functionBody(app(), 'returnToLock')).toMatch(/sessionEpoch \+= 1/);
+  });
+
+  // Critical 2 (review, round 2): the epoch means "the vault locked", full
+  // stop. Opening a different editor mid-save is a separate event — the
+  // save in flight still needs to land in memory, which bumping this same
+  // counter there would have prevented. One counter, one meaning.
+  it('does not bump the session epoch when a fresh editor opens — only a lock does', () => {
+    expect(functionBody(app(), 'openEditor')).not.toMatch(/sessionEpoch/);
+  });
+
+  // Critical 2 (review, round 3): `editing` holds a date, not a session
+  // identity, so two sessions opened back-to-back on the SAME day (open X,
+  // Save pending, Cancel, reopen X, type new values) are otherwise
+  // indistinguishable by date alone when the first save resolves. A real
+  // token, bumped on every open, is what tells them apart.
+  it('gives every fresh editor its own session token', () => {
+    expect(functionBody(app(), 'openEditor')).toMatch(/editSession \+= 1;/);
+  });
+
+  it('captures the session token before the first await, alongside the epoch', () => {
+    const body = functionBody(app(), 'saveDay');
+    const sessionCaptureIndex = body.indexOf('const session = editSession;');
+    const awaitIndex = body.indexOf('await writePromise;');
+    expect(sessionCaptureIndex, 'const session = editSession;').toBeGreaterThan(-1);
+    expect(awaitIndex, 'await writePromise;').toBeGreaterThan(-1);
+    expect(sessionCaptureIndex).toBeLessThan(awaitIndex);
+  });
+
+  // The date dropped out of saveOutcome entirely in round 3 — a session
+  // token implies its date, and only the token can tell two sessions on the
+  // same day apart. Pin that saveDay passes tokens, not editing/date.
+  it('calls saveOutcome with both session tokens, not with editing/date', () => {
+    const body = functionBody(app(), 'saveDay');
+    const calls = [...body.matchAll(/saveOutcome\(\{([^}]*)\}\)/g)];
+    // Without this, removing every call would make the loop below run zero
+    // times and the test would pass having asserted nothing. There are two
+    // call sites — the success path and the failure path.
+    expect(calls.length, 'saveOutcome( call sites').toBeGreaterThanOrEqual(2);
+    for (const [, call] of calls) {
+      expect(call).toMatch(/sessionAtStart:\s*session/);
+      expect(call).toMatch(/sessionNow:\s*editSession/);
+      expect(call).not.toMatch(/\bediting\b/);
+      expect(call).not.toMatch(/\bdate\b/);
+    }
+  });
+
+  // Critical 2 (review, round 2): the data-loss mechanism after round 1's
+  // fix was that openDoc was only resynced when the save was still the
+  // visible session — so a superseded save's write landed in the vault but
+  // never in memory, and the next save computed `next` from that stale
+  // base and overwrote it. openDoc must be assigned on every outcome except
+  // 'abandon' (the vault locked, so memory must stay null), and specifically
+  // before the 'adopt-only' check that decides whether to also repaint.
+  it('updates memory on an abandoned-screen save too, before deciding whether to repaint', () => {
+    const body = functionBody(app(), 'saveDay');
+    const abandonIndex = body.indexOf("outcome === 'abandon'");
+    const openDocIndex = body.indexOf('openDoc = next;');
+    const adoptOnlyIndex = body.indexOf("outcome === 'adopt-only'");
+    expect(abandonIndex, "the 'abandon' check").toBeGreaterThan(-1);
+    expect(openDocIndex, 'openDoc = next;').toBeGreaterThan(abandonIndex);
+    expect(adoptOnlyIndex, "the 'adopt-only' check").toBeGreaterThan(openDocIndex);
+  });
+
+  it('decides with the pure, tested saveOutcome function rather than its own logic', () => {
+    expect(functionBody(app(), 'saveDay')).toMatch(/saveOutcome\(/);
+  });
+
+  // Critical 2 (review, round 2): the button's `disabled` attribute is not a
+  // lock — Cancel/openEditor re-render the panel and hand out a brand-new,
+  // enabled button while an earlier save is still pending. A real flag at
+  // module scope is what actually serialises concurrent saves.
+  it('serialises saves with a real in-flight flag, not just the button attribute', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body).toMatch(/saveInFlight = true;/);
+    expect(body).toMatch(/finally\s*\{[\s\S]*saveInFlight = false;[\s\S]*\}/);
+  });
+
+  // Critical 2 follow-up (review, round 2): round 1's in-flight flag made a
+  // tap during a pending save a dead click — it returned with no message and
+  // no visible change. The block must say so instead of doing nothing.
+  it('tells her when a tap is blocked because a save is already in flight', () => {
+    const body = functionBody(app(), 'saveDay');
+    const guardIndex = body.indexOf('if (saveInFlight)');
+    expect(guardIndex, 'the saveInFlight guard').toBeGreaterThan(-1);
+    const guardBlock = body.slice(guardIndex, body.indexOf('saveInFlight = true;'));
+    expect(guardBlock).toMatch(/edit-error/);
+    expect(guardBlock).toMatch(/errorField !== null/);
+  });
+
+  // Critical 2 (review, round 1): before this fix, the failure branch called
+  // say('edit-error', ...), which assumes the element exists. #edit-error
+  // can be gone by the time a stale save's catch runs (a later re-render
+  // replaced the panel), and a throw inside a catch is worse than the
+  // silent failure it would be reporting.
+  it('does not assume #edit-error still exists when reporting a failure', () => {
+    const body = functionBody(app(), 'saveDay');
+    const catchBody = body.slice(body.search(/\bcatch\b/));
+    expect(catchBody).toMatch(/getElementById\('edit-error'\)/);
+    expect(catchBody).toMatch(/if \(errorField !== null\)/);
+  });
+
+  // Important (review, round 4): open day X's editor, Save (pending),
+  // Cancel, tap day Y on the calendar — editSession has not moved (only
+  // openEditor bumps it, and nothing reopened), so the outcome is
+  // 'adopt-and-render'. The summary and calendar must still refresh and
+  // `editing` must still clear, but pulling the panel back to X with
+  // selectDay(date) would yank her away from Y, which she never asked for.
+  it('refreshes the summary and calendar unconditionally, but only repaints the panel if she is still looking at that day', () => {
+    const body = functionBody(app(), 'saveDay');
+    const summaryIndex = body.indexOf("el('summary').innerHTML = renderSummary(openSummary);");
+    const drawIndex = body.indexOf('drawCalendar();');
+    const clearIndex = body.indexOf('editing = null;');
+    const guardIndex = body.indexOf('if (selectedDate === date) selectDay(date);');
+    expect(summaryIndex, "el('summary').innerHTML = ...").toBeGreaterThan(-1);
+    expect(drawIndex, 'drawCalendar();').toBeGreaterThan(summaryIndex);
+    expect(clearIndex, 'editing = null;').toBeGreaterThan(drawIndex);
+    expect(guardIndex, 'if (selectedDate === date) selectDay(date);').toBeGreaterThan(clearIndex);
+  });
+
+  // Important 4 (final review): openSummary was recomputed in the
+  // 'adopt-only' branch but the function then returned without repainting
+  // #summary or the calendar — so recording today as heavy flow while a
+  // different editor happened to be open left the card showing stale
+  // lateness over a period that was now in the vault. The summary/calendar
+  // refresh must sit BEFORE the 'adopt-only' check, so it runs on that
+  // outcome too; only the panel repaint and clearing `editing` stay gated.
+  it("repaints the summary and calendar even when the outcome is 'adopt-only'", () => {
+    const body = functionBody(app(), 'saveDay');
+    const openDocIndex = body.indexOf('openDoc = next;');
+    const summaryIndex = body.indexOf("el('summary').innerHTML = renderSummary(openSummary);");
+    const drawIndex = body.indexOf('drawCalendar();');
+    const adoptOnlyIndex = body.indexOf("outcome === 'adopt-only'");
+    expect(openDocIndex, 'openDoc = next;').toBeGreaterThan(-1);
+    expect(summaryIndex, "el('summary').innerHTML = ...").toBeGreaterThan(openDocIndex);
+    expect(drawIndex, 'drawCalendar();').toBeGreaterThan(summaryIndex);
+    expect(adoptOnlyIndex, "the 'adopt-only' check").toBeGreaterThan(drawIndex);
+  });
+
+  // Important 3 (final review): on the failure path, both 'abandon' and
+  // 'adopt-only' used to return with no trace at all — a save that failed
+  // while the vault was locking, or while a different editor was open, left
+  // nothing recorded anywhere. unsavedWarning (surfaced by paint()) is the
+  // one place left that can still tell her, on the next unlock.
+  it('remembers a failed save that could not show its own message', () => {
+    const body = functionBody(app(), 'saveDay');
+    const catchBody = body.slice(body.search(/\bcatch\b/));
+    const outcomeCheckIndex = catchBody.indexOf("outcome !== 'adopt-and-render'");
+    const warningIndex = catchBody.indexOf('unsavedWarning = date;');
+    expect(outcomeCheckIndex, "the 'adopt-and-render' check").toBeGreaterThan(-1);
+    expect(warningIndex, 'unsavedWarning = date;').toBeGreaterThan(outcomeCheckIndex);
+  });
+
+  it('surfaces a remembered save failure the next time paint() runs, then forgets it', () => {
+    const body = functionBody(app(), 'paint');
+    expect(body, 'paint').not.toBeNull();
+    expect(body).toMatch(/unsavedWarning !== null/);
+    expect(body).toMatch(/unsavedWarning = null;/);
+  });
+
+  // Important 7 (final review): an unlock arriving while a save was still
+  // writing used to call vault.read() immediately, reading the pre-save
+  // document; her next save would then compute from that stale base and
+  // silently overwrite the earlier edit. paint() must wait for any pending
+  // write before it reads.
+  it('holds the in-flight save so paint() can wait for it before reading', () => {
+    const body = functionBody(app(), 'saveDay');
+    expect(body).toMatch(/pendingSave = writePromise;/);
+    const paintBody = functionBody(app(), 'paint');
+    expect(paintBody, 'paint').not.toBeNull();
+    const pendingIndex = paintBody.indexOf('await pendingSave');
+    const readIndex = paintBody.indexOf('vault.read()');
+    expect(pendingIndex, 'await pendingSave').toBeGreaterThan(-1);
+    expect(readIndex, 'vault.read()').toBeGreaterThan(pendingIndex);
+  });
+
+  it('awaits paint() in unlock and faceIdUnlock, so a throw inside it is still caught there', () => {
+    // create()'s own await-paint wiring has its own test above
+    // ("runs paint() unconditionally..."); this covers the other two
+    // call sites, which this round's fix (paint() now awaits pendingSave
+    // first) turned into real await points for the first time.
+    expect(functionBody(app(), 'unlock')).toMatch(/await paint\(\);/);
+    expect(functionBody(app(), 'faceIdUnlock')).toMatch(/await paint\(\);/);
+  });
+
+  // Data loss (review, round 4), pre-existing but the same class of problem
+  // this whole task has been about: the calendar's click listener used to
+  // call selectDay(cell.dataset.date) unconditionally, replacing
+  // #day-detail wholesale and wiping a half-typed entry with no warning.
+  describe('tapping the calendar while the editor is open', () => {
+    const calendarHandler = () => {
+      const match = app().match(/calendar'\)\.addEventListener\('click', event => \{([\s\S]*?)\n\}\);/);
+      expect(match, 'calendar click handler').not.toBeNull();
+      return match[1];
+    };
+
+    it('checks editing before ever calling selectDay', () => {
+      const handler = calendarHandler();
+      const guardIndex = handler.indexOf('editing !== null');
+      const selectDayIndex = handler.lastIndexOf('selectDay(date)');
+      expect(guardIndex, 'editing !== null check').toBeGreaterThan(-1);
+      expect(selectDayIndex, 'selectDay(date) call').toBeGreaterThan(guardIndex);
+    });
+
+    // Minor (final branch review): the earlier version of this test anchored
+    // on the first `return;` in the handler, which is the `cell === null`
+    // guard at the very top — it would not have caught selectDay being
+    // called from inside the `editing !== date` sub-branch. This extracts
+    // the `if (editing !== null) { ... }` block itself by balanced braces,
+    // so it can assert selectDay is nowhere inside it, and still runs once
+    // that block is behind it.
+    it('never calls selectDay from inside the editing guard, but still reaches it once editing is null', () => {
+      const handler = calendarHandler();
+      const guardBlock = balancedBlockAfter(handler, 'if (editing !== null)');
+      expect(guardBlock, 'if (editing !== null) { ... } block').not.toBeNull();
+      expect(guardBlock).not.toContain('selectDay(');
+      const afterGuard = handler.slice(handler.indexOf(guardBlock) + guardBlock.length);
+      expect(afterGuard).toContain('selectDay(date)');
+    });
+
+    it('warns rather than silently discarding when a different day is tapped mid-edit', () => {
+      const handler = calendarHandler();
+      expect(handler).toMatch(/editing !== date/);
+      expect(handler).toMatch(/edit-error/);
+      expect(handler).toMatch(/Save or cancel this day first/);
+    });
   });
 });
