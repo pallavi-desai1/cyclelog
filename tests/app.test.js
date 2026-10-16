@@ -67,9 +67,15 @@ describe('app wiring', () => {
   it('assigns only the renderer output to innerHTML', () => {
     // Markup reaches the page from the two tested renderers or not at all;
     // anything else here would be a string built outside their escaping.
-    const allowed = ['renderSummary(openSummary)', 'renderCalendar(grid)', "''"];
+    const squash = text => text.replace(/\s+/g, ' ').trim();
+    const allowed = [
+      'renderSummary(openSummary)',
+      'renderCalendar(grid)',
+      "''",
+      'renderDay(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDate: openSummary.baseline.date, }))',
+    ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
-      expect(allowed).toContain(expression.trim());
+      expect(allowed).toContain(squash(expression));
     }
   });
 
@@ -168,7 +174,7 @@ describe('idle locking', () => {
     const text = app();
     const inHelper = (functionBody(text, 'returnToLock').match(/innerHTML = ''/g) || []).length;
     const everywhere = (text.match(/innerHTML = ''/g) || []).length;
-    expect(inHelper).toBe(2);        // the summary and the calendar
+    expect(inHelper).toBe(3);        // the summary, the calendar and the day panel
     expect(everywhere).toBe(inHelper);
   });
 });
@@ -326,5 +332,33 @@ describe('precache', () => {
     ]) {
       expect(sw(), module).toContain(module);
     }
+  });
+});
+
+describe('tapping a day', () => {
+  it('has somewhere to put the day panel', () => {
+    expect(html()).toContain('id="day-detail"');
+  });
+
+  it('renders the panel through the tested renderer', () => {
+    expect(app()).toContain('renderDay(');
+    expect(app()).toContain('dayDetail(');
+  });
+
+  // One delegated listener on the grid, not one per cell: the grid is
+  // re-rendered on every month step, and per-cell listeners would be
+  // re-attached (or silently lost) each time.
+  it('listens once on the grid rather than per cell', () => {
+    const text = app();
+    expect(text).toMatch(/calendar'\)\.addEventListener\('click'/);
+    expect(text).toMatch(/closest\('\[data-date\]'\)|dataset\.date/);
+  });
+
+  it('clears the panel when the vault locks', () => {
+    expect(functionBody(app(), 'returnToLock')).toMatch(/day-detail'\)\.innerHTML = ''/);
+  });
+
+  it('keeps the selected day across a month step', () => {
+    expect(functionBody(app(), 'stepMonth')).not.toMatch(/selectedDate = null/);
   });
 });

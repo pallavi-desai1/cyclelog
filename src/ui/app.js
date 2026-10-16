@@ -9,7 +9,8 @@ import {
 } from '../import.js';
 import { buildSummary } from '../summary.js';
 import { monthGrid, monthOf, shiftMonth } from '../calendar.js';
-import { renderSummary, renderCalendar } from './render.js';
+import { dayDetail } from '../day.js';
+import { renderSummary, renderCalendar, renderDay } from './render.js';
 import { localToday } from '../today.js';
 
 if ('serviceWorker' in navigator) {
@@ -43,6 +44,7 @@ let hasVault = false;
 function returnToLock() {
   el('summary').innerHTML = '';
   el('calendar').innerHTML = '';
+  el('day-detail').innerHTML = '';
   say('cal-label', '');
   say('import-notice', '');
   // The decrypted document must not outlive the lock (spec §8), and the
@@ -66,6 +68,7 @@ function returnToLock() {
 let openDoc = null;
 let openSummary = null;
 let viewMonth = null;
+let selectedDate = null;
 
 function paint(note = '') {
   openDoc = parseDocument(vault.read());
@@ -73,6 +76,7 @@ function paint(note = '') {
   el('summary').innerHTML = renderSummary(openSummary);
   say('import-notice', note);
   viewMonth = monthOf(localToday());
+  selectedDate = null;
   drawCalendar();
   screen('app');
 }
@@ -87,6 +91,29 @@ function drawCalendar() {
   });
   say('cal-label', grid.label);
   el('calendar').innerHTML = renderCalendar(grid);
+  markSelected();
+}
+
+// Applied after each render rather than baked into the grid model: the
+// selection is a property of this view, not of her data.
+function markSelected() {
+  if (selectedDate === null) return;
+  const cell = el('calendar').querySelector(`[data-date="${selectedDate}"]`);
+  if (cell !== null) cell.classList.add('cal-selected');
+}
+
+function selectDay(date) {
+  if (openDoc === null) return;
+  selectedDate = date;
+  for (const cell of el('calendar').querySelectorAll('.cal-selected')) {
+    cell.classList.remove('cal-selected');
+  }
+  markSelected();
+  el('day-detail').innerHTML = renderDay(dayDetail(openDoc, date, {
+    todayISO: localToday(),
+    adaptedDate: openSummary.adapted.date,
+    baselineDate: openSummary.baseline.date,
+  }));
 }
 
 function stepMonth(delta) {
@@ -261,6 +288,12 @@ async function start() {
 el('create').addEventListener('click', () => { create(); });
 el('unlock').addEventListener('click', () => { unlock(); });
 el('faceid').addEventListener('click', () => { faceIdUnlock(); });
+// One delegated listener: the grid is rebuilt on every month step, so
+// per-cell listeners would have to be re-attached each time.
+el('calendar').addEventListener('click', event => {
+  const cell = event.target.closest('[data-date]');
+  if (cell !== null) selectDay(cell.dataset.date);
+});
 el('cal-prev').addEventListener('click', () => { stepMonth(-1); });
 el('cal-next').addEventListener('click', () => { stepMonth(1); });
 el('lock-now').addEventListener('click', () => {

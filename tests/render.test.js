@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildSummary } from '../src/summary.js';
-import { escapeHtml, renderSummary, renderCalendar } from '../src/ui/render.js';
+import { escapeHtml, renderSummary, renderCalendar, renderDay } from '../src/ui/render.js';
 import { monthGrid } from '../src/calendar.js';
 
 const spans = () => [
@@ -239,5 +239,89 @@ describe('the calendar', () => {
     const opens = (output.match(/<(?!\/)[a-z]/g) ?? []).length;
     const closes = (output.match(/<\//g) ?? []).length;
     expect(opens).toBe(closes);
+  });
+});
+
+describe('the day panel', () => {
+  const base = {
+    date: '2015-03-10', label: '10 March 2015', isToday: false, isFuture: false,
+    cycleStart: '2015-02-26', cycleDay: 13, isPeriod: false, periodDay: null,
+    hasEntry: true,
+    logged: [{ label: 'Flow', value: 'heavy' }, { label: 'Notes', value: 'rough day' }],
+    source: 'clue', isApproximate: false,
+    method: { method: 'pill', startedOn: '2015-02-01' },
+    predicted: false, baseline: false,
+  };
+  const detail = (overrides = {}) => ({ ...base, ...overrides });
+
+  it('heads the panel with the date', () => {
+    expect(renderDay(detail())).toContain('10 March 2015');
+  });
+
+  it('says where the day sits in the cycle', () => {
+    expect(renderDay(detail())).toMatch(/Day 13/);
+  });
+
+  it('says which day of the period it is', () => {
+    expect(renderDay(detail({ isPeriod: true, periodDay: 2 }))).toMatch(/day 2 of your period/i);
+  });
+
+  it('lists what was logged', () => {
+    const html = renderDay(detail());
+    expect(html).toContain('Flow');
+    expect(html).toContain('heavy');
+    expect(html).toContain('rough day');
+  });
+
+  it('says plainly when nothing was logged', () => {
+    const html = renderDay(detail({ hasEntry: false, logged: [] }));
+    expect(html).toMatch(/Nothing logged/i);
+  });
+
+  it('marks an imported entry and an approximate date', () => {
+    const html = renderDay(detail({ isApproximate: true }));
+    expect(html).toMatch(/imported from clue/i);
+    expect(html).toMatch(/approximate/i);
+  });
+
+  it('says a period is expected on that day', () => {
+    expect(renderDay(detail({ predicted: true }))).toMatch(/period expected/i);
+  });
+
+  it('says the counterfactual in the past tense, never as lateness', () => {
+    const html = renderDay(detail({ baseline: true }));
+    expect(html).toMatch(/without birth control/i);
+    expect(html).not.toMatch(/late/i);
+  });
+
+  it('names the method in force that day', () => {
+    expect(renderDay(detail())).toContain('pill');
+  });
+
+  it('says when a day is still ahead', () => {
+    expect(renderDay(detail({ isFuture: true }))).toMatch(/still to come|upcoming/i);
+  });
+
+  it('has no cycle day before the first period logged', () => {
+    const html = renderDay(detail({ cycleStart: null, cycleDay: null }));
+    expect(html).not.toMatch(/Day null|Day undefined/);
+  });
+
+  it('escapes what was logged', () => {
+    const html = renderDay(detail({ logged: [{ label: 'Notes', value: '<img src=x>' }] }));
+    expect(html).not.toContain('<img');
+  });
+
+  it('prints no null, undefined or NaN', () => {
+    const html = renderDay(detail({
+      cycleStart: null, cycleDay: null, hasEntry: false, logged: [],
+      source: null, method: null,
+    }));
+    expect(html).not.toMatch(/null|undefined|NaN/);
+  });
+
+  it('produces balanced markup', () => {
+    const html = renderDay(detail());
+    expect((html.match(/<(?!\/)[a-z]/g) ?? []).length).toBe((html.match(/<\//g) ?? []).length);
   });
 });

@@ -394,3 +394,24 @@ describe('boot module', () => {
     }
   });
 });
+
+describe('day panel and selection styling', () => {
+  it('styles the panel and the selected cell', () => {
+    for (const selector of ['.day', '.day-empty', '.day-source', '.cal-selected']) {
+      expect(hasSelector(selector), selector).toBe(true);
+    }
+  });
+
+  // .cal-cell is a <button>, and the global button rule makes controls
+  // full-width pink: without an opt-out every day square would render as a
+  // giant action button.
+  it('opts calendar cells out of the full-width control styling', () => {
+    const rule = ruleBody('.cal-cell');
+    expect(rule).toMatch(/width:\s*auto/);
+    expect(rule).toMatch(/margin:\s*0/);
+  });
+
+  it('gives a keyboard focus ring to the day cells', () => {
+    expect(css()).toMatch(/\.cal-cell:focus-visible/);
+  });
+});

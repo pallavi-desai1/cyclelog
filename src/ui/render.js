@@ -140,12 +140,59 @@ export function renderCalendar(grid) {
     .map(name => `<div class="cal-weekday">${escapeHtml(name)}</div>`)
     .join('');
 
+  // Buttons, not divs: every day is tappable, reachable by keyboard, and
+  // announced with its own label. The date rides on the element so the click
+  // handler never has to recompute which cell was pressed.
   const cells = grid.weeks.flat().map(cell => (
-    `<div class="${cellClasses(cell)}" aria-label="${escapeHtml(cellLabel(cell))}">`
+    `<button type="button" class="${cellClasses(cell)}" data-date="${escapeHtml(cell.date)}"`
+    + ` aria-label="${escapeHtml(cellLabel(cell))}">`
     + `<span class="cal-day">${escapeHtml(cell.day)}</span>`
     + flowDot(cell)
-    + '</div>'
+    + '</button>'
   )).join('');
 
   return `<div class="cal-grid">${head}${cells}</div>`;
+}
+
+// The panel under the calendar: what this day was, where it sits in the
+// cycle, and only what was actually recorded on it.
+export function renderDay(detail) {
+  const parts = [`<section class="card day${detail.isToday ? ' day-today' : ''}">`];
+  parts.push(`<h3>${escapeHtml(detail.label)}${detail.isToday ? ' — today' : ''}</h3>`);
+
+  if (detail.cycleDay !== null) {
+    const cycle = detail.isPeriod && detail.periodDay !== null
+      ? `Day ${escapeHtml(detail.cycleDay)} of this cycle — day ${escapeHtml(detail.periodDay)} of your period`
+      : `Day ${escapeHtml(detail.cycleDay)} of this cycle`;
+    parts.push(line('Cycle', cycle));
+  }
+
+  if (detail.isFuture) parts.push(line('', 'Still to come'));
+  if (detail.predicted) parts.push(line('', 'Period expected on this day'));
+  if (detail.baseline) {
+    parts.push(line('', 'Where a period would have fallen without birth control'));
+  }
+  if (detail.method !== null) {
+    parts.push(line('Method', `${escapeHtml(detail.method.method)} since ${escapeHtml(detail.method.startedOn)}`));
+  }
+
+  if (detail.logged.length === 0) {
+    parts.push('<p class="day-empty">Nothing logged on this day.</p>');
+  } else {
+    for (const item of detail.logged) {
+      parts.push(line(item.label, escapeHtml(item.value)));
+    }
+  }
+
+  // Spec §10.1: imported entries are marked, and approximate dates say so —
+  // a date she is unsure of should not read as a measurement.
+  const provenance = [];
+  if (detail.source) provenance.push(`imported from ${escapeHtml(detail.source)}`);
+  if (detail.isApproximate) provenance.push('date is approximate');
+  if (provenance.length > 0) {
+    parts.push(`<p class="day-source">${provenance.join(', ')}</p>`);
+  }
+
+  parts.push('</section>');
+  return parts.join('');
 }
