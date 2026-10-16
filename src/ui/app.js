@@ -258,7 +258,11 @@ async function saveDay() {
     el('summary').innerHTML = renderSummary(openSummary);
     drawCalendar();
     editing = null;
-    selectDay(date);
+    // She may have Cancelled and tapped a different day on the calendar
+    // while this was saving — her panel belongs to whatever she is looking
+    // at now, not to the day that just finished saving, unless those are
+    // the same day.
+    if (selectedDate === date) selectDay(date);
   } catch {
     // A failed save never reached the vault, so there is nothing for memory
     // to adopt — only whether this is still the visible form, to decide
@@ -454,7 +458,21 @@ el('faceid').addEventListener('click', () => { faceIdUnlock(); });
 // per-cell listeners would have to be re-attached each time.
 el('calendar').addEventListener('click', event => {
   const cell = event.target.closest('[data-date]');
-  if (cell !== null) selectDay(cell.dataset.date);
+  if (cell === null) return;
+  const date = cell.dataset.date;
+  if (editing !== null) {
+    // selectDay would replace #day-detail wholesale, wiping a half-typed
+    // entry with no warning. Tapping the day already open is a no-op —
+    // re-rendering the same editor would wipe it too — and tapping a
+    // different day must not navigate away from it either: Save and
+    // Cancel are both already on screen, so this costs one tap, not data.
+    if (editing !== date) {
+      const errorField = document.getElementById('edit-error');
+      if (errorField !== null) errorField.textContent = 'Save or cancel this day first.';
+    }
+    return;
+  }
+  selectDay(date);
 });
 // The panel and the form are both re-rendered, so these are delegated from
 // the container that survives rather than attached to elements that get

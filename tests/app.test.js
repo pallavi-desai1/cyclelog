@@ -485,7 +485,12 @@ describe('editing a day', () => {
   // same day apart. Pin that saveDay passes tokens, not editing/date.
   it('calls saveOutcome with both session tokens, not with editing/date', () => {
     const body = functionBody(app(), 'saveDay');
-    for (const [, call] of body.matchAll(/saveOutcome\(\{([^}]*)\}\)/g)) {
+    const calls = [...body.matchAll(/saveOutcome\(\{([^}]*)\}\)/g)];
+    // Without this, removing every call would make the loop below run zero
+    // times and the test would pass having asserted nothing. There are two
+    // call sites — the success path and the failure path.
+    expect(calls.length, 'saveOutcome( call sites').toBeGreaterThanOrEqual(2);
+    for (const [, call] of calls) {
       expect(call).toMatch(/sessionAtStart:\s*session/);
       expect(call).toMatch(/sessionNow:\s*editSession/);
       expect(call).not.toMatch(/\bediting\b/);
@@ -546,5 +551,61 @@ describe('editing a day', () => {
     const catchBody = body.slice(body.search(/\bcatch\b/));
     expect(catchBody).toMatch(/getElementById\('edit-error'\)/);
     expect(catchBody).toMatch(/if \(errorField !== null\)/);
+  });
+
+  // Important (review, round 4): open day X's editor, Save (pending),
+  // Cancel, tap day Y on the calendar — editSession has not moved (only
+  // openEditor bumps it, and nothing reopened), so the outcome is
+  // 'adopt-and-render'. The summary and calendar must still refresh and
+  // `editing` must still clear, but pulling the panel back to X with
+  // selectDay(date) would yank her away from Y, which she never asked for.
+  it('refreshes the summary and calendar unconditionally, but only repaints the panel if she is still looking at that day', () => {
+    const body = functionBody(app(), 'saveDay');
+    const summaryIndex = body.indexOf("el('summary').innerHTML = renderSummary(openSummary);");
+    const drawIndex = body.indexOf('drawCalendar();');
+    const clearIndex = body.indexOf('editing = null;');
+    const guardIndex = body.indexOf('if (selectedDate === date) selectDay(date);');
+    expect(summaryIndex, "el('summary').innerHTML = ...").toBeGreaterThan(-1);
+    expect(drawIndex, 'drawCalendar();').toBeGreaterThan(summaryIndex);
+    expect(clearIndex, 'editing = null;').toBeGreaterThan(drawIndex);
+    expect(guardIndex, 'if (selectedDate === date) selectDay(date);').toBeGreaterThan(clearIndex);
+  });
+
+  // Data loss (review, round 4), pre-existing but the same class of problem
+  // this whole task has been about: the calendar's click listener used to
+  // call selectDay(cell.dataset.date) unconditionally, replacing
+  // #day-detail wholesale and wiping a half-typed entry with no warning.
+  describe('tapping the calendar while the editor is open', () => {
+    const calendarHandler = () => {
+      const match = app().match(/calendar'\)\.addEventListener\('click', event => \{([\s\S]*?)\n\}\);/);
+      expect(match, 'calendar click handler').not.toBeNull();
+      return match[1];
+    };
+
+    it('checks editing before ever calling selectDay', () => {
+      const handler = calendarHandler();
+      const guardIndex = handler.indexOf('editing !== null');
+      const selectDayIndex = handler.lastIndexOf('selectDay(date)');
+      expect(guardIndex, 'editing !== null check').toBeGreaterThan(-1);
+      expect(selectDayIndex, 'selectDay(date) call').toBeGreaterThan(guardIndex);
+    });
+
+    it('reaches selectDay only after the editing guard has returned', () => {
+      // The one call to selectDay in this handler must sit after the
+      // guard's own `return;` — i.e. outside the `if (editing !== null)`
+      // block entirely, not merely somewhere later in the source text.
+      const handler = calendarHandler();
+      const returnIndex = handler.indexOf('return;');
+      const selectDayIndex = handler.lastIndexOf('selectDay(date)');
+      expect(returnIndex, 'return; inside the editing guard').toBeGreaterThan(-1);
+      expect(selectDayIndex).toBeGreaterThan(returnIndex);
+    });
+
+    it('warns rather than silently discarding when a different day is tapped mid-edit', () => {
+      const handler = calendarHandler();
+      expect(handler).toMatch(/editing !== date/);
+      expect(handler).toMatch(/edit-error/);
+      expect(handler).toMatch(/Save or cancel this day first/);
+    });
   });
 });
