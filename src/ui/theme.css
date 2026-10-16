@@ -426,3 +426,16 @@ input { font-family: var(--font-body); }
   background: var(--surface);
   color: var(--text);
 }
+
+/* "Today" sits beside the arrows: a small control, not a full-width action. */
+#cal-today {
+  width: auto;
+  margin: 0;
+  padding: 0 12px;
+  min-height: var(--tap);
+  font-family: var(--font-body);
+  font-size: 0.85em;
+  background: var(--surface);
+  color: var(--heading);
+  border: 1px solid var(--border);
+}

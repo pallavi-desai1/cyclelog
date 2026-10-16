@@ -361,6 +361,22 @@ function jumpToPickedMonth() {
   closePicker();
 }
 
+function goToToday() {
+  if (openDoc === null) return;
+  // The same rule the calendar cells follow: navigation must not destroy a
+  // half-typed entry.
+  if (editing !== null) {
+    const errorField = document.getElementById('edit-error');
+    if (errorField !== null) errorField.textContent = 'Save or cancel this day first.';
+    return;
+  }
+  viewMonth = monthOf(localToday());
+  closePicker();
+  drawCalendar();
+  // "Today's date", not just its month: the panel lands on today too.
+  selectDay(localToday());
+}
+
 function stepMonth(delta) {
   if (viewMonth === null) return;
   viewMonth = shiftMonth(viewMonth, delta);
@@ -577,6 +593,7 @@ el('cal-label').addEventListener('click', () => { togglePicker(); });
 el('cal-picker').addEventListener('change', event => {
   if (event.target.id === 'cal-month' || event.target.id === 'cal-year') jumpToPickedMonth();
 });
+el('cal-today').addEventListener('click', () => { goToToday(); });
 el('cal-prev').addEventListener('click', () => { stepMonth(-1); });
 el('cal-next').addEventListener('click', () => { stepMonth(1); });
 el('lock-now').addEventListener('click', () => {

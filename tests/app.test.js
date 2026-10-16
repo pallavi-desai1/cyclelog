@@ -720,3 +720,43 @@ describe('editing a day', () => {
     });
   });
 });
+
+describe('the Today button', () => {
+  it('sits in the calendar head', () => {
+    expect(html()).toContain('id="cal-today"');
+    // After the next-month arrow, which is where she asked for it.
+    expect(html().indexOf('id="cal-today"')).toBeGreaterThan(html().indexOf('id="cal-next"'));
+  });
+
+  it('is wired to a handler', () => {
+    expect(app()).toMatch(/cal-today'\)\.addEventListener\('click'/);
+  });
+
+  it('jumps to the month that contains today, not a hardcoded one', () => {
+    const body = functionBody(app(), 'goToToday');
+    expect(body, 'goToToday').not.toBeNull();
+    expect(body).toMatch(/monthOf\(localToday\(\)\)/);
+  });
+
+  it('selects today as well as its month, since that is the date she asked for', () => {
+    expect(functionBody(app(), 'goToToday')).toMatch(/selectDay\(localToday\(\)\)/);
+  });
+
+  it('closes the month picker on the way', () => {
+    expect(functionBody(app(), 'goToToday')).toMatch(/closePicker\(\)/);
+  });
+
+  // The same rule the calendar cells follow: navigation must not destroy a
+  // half-typed entry.
+  it('refuses to navigate out from under an open editor', () => {
+    const body = functionBody(app(), 'goToToday');
+    const guard = body.indexOf('editing !== null');
+    const jump = body.indexOf('viewMonth =');
+    expect(guard, 'editing guard').toBeGreaterThan(-1);
+    expect(guard, 'guard precedes the jump').toBeLessThan(jump);
+  });
+
+  it('does nothing while the vault is locked', () => {
+    expect(functionBody(app(), 'goToToday')).toMatch(/openDoc === null/);
+  });
+});

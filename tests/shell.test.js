@@ -28,18 +28,22 @@ function precacheList() {
 // styled selector.
 const cssRules = () => css().replace(/\/\*[\s\S]*?\*\//g, '');
 
+function selectorPattern(selector) {
+  // Accepts .class and #id; the boundary check keeps `.cal-cell` from
+  // matching inside `.cal-cell-foo`.
+  const sigil = selector.startsWith('#') ? '#' : '\\.';
+  const name = selector.replace(/^[.#]/, '');
+  return `(^|[\\s,}])${sigil}${name}(?=[\\s,.:{])`;
+}
+
 function hasSelector(selector) {
-  const name = selector.replace(/^\./, '');
-  return new RegExp(`(^|[\\s,}])\\.${name}(?=[\\s,.:{])`).test(cssRules());
+  return new RegExp(selectorPattern(selector)).test(cssRules());
 }
 
 // The declaration block of the first rule whose selector list mentions the
-// class — enough to assert on a property's value.
+// class or id — enough to assert on a property's value.
 function ruleBody(selector) {
-  const name = selector.replace(/^\./, '');
-  const match = new RegExp(
-    `(^|[\\s,}])\\.${name}(?=[\\s,.:{])[^{}]*\\{([^}]*)\\}`,
-  ).exec(cssRules());
+  const match = new RegExp(`${selectorPattern(selector)}[^{}]*\\{([^}]*)\\}`).exec(cssRules());
   return match === null ? '' : match[2];
 }
 
@@ -534,5 +538,13 @@ describe('editor styling', () => {
 
   it('keeps the checkboxes at a usable tap size', () => {
     expect(ruleBody('.edit-check')).toMatch(/min-height/);
+  });
+});
+
+describe('the Today button styling', () => {
+  it('is styled as a label-sized control, not a full-width action', () => {
+    const rule = ruleBody('#cal-today');
+    expect(rule).toMatch(/width:\s*auto/);
+    expect(rule).toMatch(/min-height/);
   });
 });
