@@ -7,10 +7,15 @@ export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // cycles is comfortably under this.
 export const MAX_PROJECTED = 2000;
 
-const MONTHS = [
+export const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
+
+// How far past today the picker reaches: enough to hold the next predicted
+// period and its counterfactual, which are the only months ahead worth
+// looking at.
+const MONTHS_AHEAD = 2;
 
 export function monthOf(iso) {
   return iso.slice(0, 7);
@@ -27,7 +32,7 @@ export function shiftMonth(month, delta) {
 }
 
 export function monthLabel(month) {
-  return `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+  return `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
 }
 
 // Every date the counterfactual cadence lands on inside a window. This is
@@ -53,6 +58,41 @@ export function projectedDates(anchorISO, lengthDays, fromISO, toISO) {
     if (date >= fromISO) dates.push(date);
   }
   return dates;
+}
+
+// Every month worth offering in the picker: from the earliest thing she ever
+// recorded to a little past today. Paging nine years back one arrow at a time
+// is not a navigation method.
+export function monthRange(doc, todayISO) {
+  const months = [monthOf(todayISO)];
+  for (const span of doc.spans ?? []) {
+    months.push(monthOf(span.start));
+    if (span.end) months.push(monthOf(span.end));
+  }
+  for (const date of Object.keys(doc.days ?? {})) months.push(monthOf(date));
+  for (const episode of doc.birthControl ?? []) months.push(monthOf(episode.startedOn));
+
+  months.sort();
+  return {
+    first: months[0],
+    last: shiftMonth(monthOf(todayISO), MONTHS_AHEAD),
+  };
+}
+
+export function yearsInRange(range) {
+  const firstYear = Number(range.first.slice(0, 4));
+  const lastYear = Number(range.last.slice(0, 4));
+  const years = [];
+  for (let year = firstYear; year <= lastYear; year += 1) years.push(year);
+  return years;
+}
+
+// Choosing a month and a year separately can land outside the range — picking
+// December in a year whose range ends in August, say.
+export function clampMonth(month, range) {
+  if (month < range.first) return range.first;
+  if (month > range.last) return range.last;
+  return month;
 }
 
 function weekdayOf(iso) {

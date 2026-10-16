@@ -49,9 +49,11 @@
   <section class="card calendar">
     <div class="cal-head">
       <button id="cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
-      <h3 id="cal-label"></h3>
+      <button id="cal-label" type="button" aria-expanded="false"
+              aria-label="Choose a month"></button>
       <button id="cal-next" type="button" aria-label="Next month">&rsaquo;</button>
     </div>
+    <div id="cal-picker" hidden></div>
     <div id="calendar"></div>
   </section>
 

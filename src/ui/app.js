@@ -8,9 +8,13 @@ import {
   documentFromSources, emptyDocument, serializeDocument, parseDocument, describeImport,
 } from '../import.js';
 import { buildSummary } from '../summary.js';
-import { monthGrid, monthOf, shiftMonth, projectedDates } from '../calendar.js';
+import {
+  monthGrid, monthOf, shiftMonth, projectedDates, monthRange, clampMonth,
+} from '../calendar.js';
 import { dayDetail } from '../day.js';
-import { renderSummary, renderCalendar, renderDay } from './render.js';
+import {
+  renderSummary, renderCalendar, renderDay, renderMonthPicker,
+} from './render.js';
 import { localToday } from '../today.js';
 import { addDays } from '../dates.js';
 import { applyDayEdit } from '../edit.js';
@@ -47,6 +51,7 @@ let hasVault = false;
 function returnToLock() {
   el('summary').innerHTML = '';
   el('calendar').innerHTML = '';
+  closePicker();
   el('day-detail').innerHTML = '';
   say('cal-label', '');
   say('import-notice', '');
@@ -324,6 +329,38 @@ async function saveDay() {
   }
 }
 
+// The picker is built from the document, so its range covers exactly the
+// months she has anything in — paging to 2015 one arrow at a time is not a
+// navigation method.
+function closePicker() {
+  el('cal-picker').innerHTML = '';
+  hide('cal-picker');
+  el('cal-label').setAttribute('aria-expanded', 'false');
+}
+
+function togglePicker() {
+  if (openDoc === null || viewMonth === null) return;
+  if (!el('cal-picker').hidden) {
+    closePicker();
+    return;
+  }
+  el('cal-picker').innerHTML = renderMonthPicker({
+    month: viewMonth,
+    range: monthRange(openDoc, localToday()),
+  });
+  show('cal-picker');
+  el('cal-label').setAttribute('aria-expanded', 'true');
+}
+
+function jumpToPickedMonth() {
+  if (openDoc === null) return;
+  const picked = `${el('cal-year').value}-${el('cal-month').value}`;
+  // A month and a year chosen separately can land outside the range.
+  viewMonth = clampMonth(picked, monthRange(openDoc, localToday()));
+  drawCalendar();
+  closePicker();
+}
+
 function stepMonth(delta) {
   if (viewMonth === null) return;
   viewMonth = shiftMonth(viewMonth, delta);
@@ -535,6 +572,10 @@ el('day-detail').addEventListener('click', event => {
 el('day-detail').addEventListener('input', () => {
   const errorField = document.getElementById('edit-error');
   if (errorField !== null) errorField.textContent = '';
+});
+el('cal-label').addEventListener('click', () => { togglePicker(); });
+el('cal-picker').addEventListener('change', event => {
+  if (event.target.id === 'cal-month' || event.target.id === 'cal-year') jumpToPickedMonth();
 });
 el('cal-prev').addEventListener('click', () => { stepMonth(-1); });
 el('cal-next').addEventListener('click', () => { stepMonth(1); });

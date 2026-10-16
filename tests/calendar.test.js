@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  WEEKDAYS, MAX_PROJECTED, monthOf, shiftMonth, monthLabel, monthGrid, projectedDates,
+  WEEKDAYS, MONTH_NAMES, MAX_PROJECTED, monthOf, shiftMonth, monthLabel, monthGrid,
+  projectedDates, monthRange, yearsInRange, clampMonth,
 } from '../src/calendar.js';
 import { addDays } from '../src/dates.js';
 
@@ -324,5 +325,69 @@ describe('positive tests on the grid', () => {
   it('does not mark a day with no test at all', () => {
     expect(cellFor(grid(), '2015-03-08').testPositive).toBe(false);
     expect(cellFor(grid(), '2015-03-09').testPositive).toBe(false);
+  });
+});
+
+describe('the months worth offering', () => {
+  const history = doc({
+    spans: [
+      { start: '2015-03-26', end: '2015-03-30', source: 'test' },
+      { start: '2016-02-01', end: '2016-02-04', source: 'test' },
+    ],
+    days: { '2015-01-14': { flow: 'light' }, '2016-05-02': { pms: true } },
+    birthControl: [{ startedOn: '2016-04-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' }],
+  });
+
+  it('starts at the earliest month anything was recorded', () => {
+    // The January day entry predates the March span.
+    expect(monthRange(history, '2016-06-10').first).toBe('2015-01');
+  });
+
+  it('runs to a little past today, so the next prediction is reachable', () => {
+    expect(monthRange(history, '2016-06-10').last).toBe('2016-08');
+  });
+
+  it('includes today even when it precedes everything recorded', () => {
+    const future = doc({ spans: [{ start: '2016-02-01', end: null, source: 'test' }] });
+    expect(monthRange(future, '2015-01-10').first).toBe('2015-01');
+  });
+
+  it('covers a document with nothing in it at all', () => {
+    const range = monthRange(doc(), '2015-06-10');
+    expect(range.first).toBe('2015-06');
+    expect(range.last).toBe('2015-08');
+  });
+
+  it('lists every year in the range, inclusive', () => {
+    expect(yearsInRange({ first: '2015-01', last: '2016-08' })).toEqual([2015, 2016]);
+    expect(yearsInRange({ first: '2015-11', last: '2015-12' })).toEqual([2015]);
+  });
+
+  it('names the months for a human', () => {
+    expect(MONTH_NAMES).toHaveLength(12);
+    expect(MONTH_NAMES[0]).toBe('January');
+    expect(MONTH_NAMES[11]).toBe('December');
+  });
+});
+
+describe('clampMonth', () => {
+  const range = { first: '2015-01', last: '2016-08' };
+
+  it('leaves a month inside the range alone', () => {
+    expect(clampMonth('2015-07', range)).toBe('2015-07');
+  });
+
+  it('pulls a month before the range up to the first', () => {
+    expect(clampMonth('2014-06', range)).toBe('2015-01');
+  });
+
+  it('pulls a month after the range down to the last', () => {
+    expect(clampMonth('2017-01', range)).toBe('2016-08');
+  });
+
+  // Picking a month and a year separately can land outside the range — for
+  // instance December of the final year when the range ends in August.
+  it('handles the two-select combination that overshoots', () => {
+    expect(clampMonth('2016-12', range)).toBe('2016-08');
   });
 });

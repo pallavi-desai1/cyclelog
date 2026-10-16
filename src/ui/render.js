@@ -1,5 +1,5 @@
 import { days } from '../summary.js';
-import { WEEKDAYS as WEEKDAY_NAMES } from '../calendar.js';
+import { WEEKDAYS as WEEKDAY_NAMES, MONTH_NAMES, yearsInRange } from '../calendar.js';
 
 const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
@@ -231,4 +231,27 @@ export function renderDay(detail) {
   parts.push('<button id="edit-day" type="button">Edit this day</button>');
   parts.push('</section>');
   return parts.join('');
+}
+
+// Month and year as two native selects rather than one list of a hundred
+// months: on a phone the native control is a wheel she already knows, and
+// twelve months beside eleven years beats scrolling a hundred-odd entries.
+export function renderMonthPicker({ month, range }) {
+  const currentMonth = month.slice(5, 7);
+  const currentYear = month.slice(0, 4);
+
+  const months = MONTH_NAMES.map((name, index) => {
+    const value = String(index + 1).padStart(2, '0');
+    return `<option value="${value}"${value === currentMonth ? ' selected' : ''}>`
+      + `${escapeHtml(name)}</option>`;
+  }).join('');
+
+  const years = yearsInRange(range).map(year => (
+    `<option value="${year}"${String(year) === currentYear ? ' selected' : ''}>${year}</option>`
+  )).join('');
+
+  return '<div class="cal-picker-row">'
+    + `<select id="cal-month" aria-label="Month">${months}</select>`
+    + `<select id="cal-year" aria-label="Year">${years}</select>`
+    + '</div>';
 }

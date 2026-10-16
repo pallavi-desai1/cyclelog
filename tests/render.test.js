@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { buildSummary } from '../src/summary.js';
-import { escapeHtml, renderSummary, renderCalendar, renderDay } from '../src/ui/render.js';
+import {
+  escapeHtml, renderSummary, renderCalendar, renderDay, renderMonthPicker,
+} from '../src/ui/render.js';
 import { monthGrid } from '../src/calendar.js';
 
 const spans = () => [
@@ -396,5 +398,54 @@ describe('calendar colour coding', () => {
   it('still balances its markup with the legend attached', () => {
     const html = renderCalendar(grid({ '2015-03-02': { flow: 'heavy' } }));
     expect((html.match(/<(?!\/)[a-z]/g) ?? []).length).toBe((html.match(/<\//g) ?? []).length);
+  });
+});
+
+describe('the month picker', () => {
+  const range = { first: '2015-01', last: '2016-08' };
+  const html = (month = '2015-07') => renderMonthPicker({ month, range });
+
+  it('offers every month of the year', () => {
+    for (const name of ['January', 'July', 'December']) expect(html()).toContain(name);
+    expect((html().match(/<option value="\d{2}"/g) ?? [])).toHaveLength(12);
+  });
+
+  it('offers every year in the range', () => {
+    expect(html()).toContain('>2015<');
+    expect(html()).toContain('>2016<');
+    expect((html().match(/<option value="\d{4}"/g) ?? [])).toHaveLength(2);
+  });
+
+  it('preselects the month and year on screen', () => {
+    expect(html('2016-02')).toMatch(/<option value="02" selected/);
+    expect(html('2016-02')).toMatch(/<option value="2016" selected/);
+  });
+
+  it('selects exactly one of each', () => {
+    expect((html().match(/selected/g) ?? [])).toHaveLength(2);
+  });
+
+  it('carries the ids the app listens on', () => {
+    expect(html()).toContain('id="cal-month"');
+    expect(html()).toContain('id="cal-year"');
+  });
+
+  it('labels both selects for a screen reader', () => {
+    expect(html()).toMatch(/aria-label="Month"/);
+    expect(html()).toMatch(/aria-label="Year"/);
+  });
+
+  it('prints no null, undefined or NaN', () => {
+    expect(html()).not.toMatch(/null|undefined|NaN/);
+  });
+
+  it('produces balanced markup', () => {
+    const output = html();
+    expect((output.match(/<(?!\/)[a-z]/g) ?? []).length).toBe((output.match(/<\//g) ?? []).length);
+  });
+
+  it('handles a one-year range', () => {
+    const narrow = renderMonthPicker({ month: '2015-03', range: { first: '2015-01', last: '2015-12' } });
+    expect((narrow.match(/<option value="\d{4}"/g) ?? [])).toHaveLength(1);
   });
 });

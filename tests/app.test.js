@@ -93,6 +93,7 @@ describe('app wiring', () => {
       'renderCalendar(grid)',
       "''",
       'renderDay(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
+      'renderMonthPicker({ month: viewMonth, range: monthRange(openDoc, localToday()), })',
       'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
@@ -193,10 +194,14 @@ describe('idle locking', () => {
     // screen through returnToLock(); no other site clears rendered markup, so
     // there is exactly one place that can forget a pane.
     const text = app();
-    const inHelper = (functionBody(text, 'returnToLock').match(/innerHTML = ''/g) || []).length;
+    const helper = functionBody(text, 'returnToLock');
+    const inHelper = (helper.match(/innerHTML = ''/g) || []).length;
     const everywhere = (text.match(/innerHTML = ''/g) || []).length;
-    expect(inHelper).toBe(3);        // the summary, the calendar and the day panel
-    expect(everywhere).toBe(inHelper);
+    expect(inHelper).toBe(3);             // the summary, the calendar and the day panel
+    expect(helper).toMatch(/closePicker\(\)/);   // the picker, through its own helper
+    // Those four are the only sites that clear rendered markup, so there is
+    // exactly one place that can forget a pane.
+    expect(everywhere).toBe(inHelper + 1);
   });
 });
 
