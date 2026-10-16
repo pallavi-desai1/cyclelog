@@ -56,6 +56,29 @@ own `private/expectations.json` with the shape the script expects. If a run
 fails a check, the importer is wrong, not the expectation — the expectations
 file must never be edited to make a failing run pass.
 
+## If you lose the phone
+
+Download **`cyclelog-backup.json`** from the app and keep it somewhere you can
+reach from another device — iCloud Drive, Dropbox, email to yourself. It is
+encrypted with a key derived from the passphrase, so a cloud copy exposes
+nothing; that is what the format is for.
+
+To restore: open the app on the new device, pick that file in **"CycleLog
+backup or data export"** on the setup screen, and type the passphrase the
+backup was made with. Everything comes back.
+
+Two things no backup can save you from:
+
+- **A forgotten passphrase.** There is no reset, no recovery and no key
+  escrow — the backup needs the same passphrase. Keep it in a password
+  manager.
+- **No backup at all.** The vault lives only in the browser storage of the
+  device it was created on. Clearing website data, deleting the home-screen
+  icon, or losing the phone takes it with them.
+
+The app asks the browser for persistent storage so the vault is not treated as
+cache, but that is a request the browser may refuse.
+
 ## Running the app
 
 ```bash

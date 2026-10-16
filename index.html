@@ -37,6 +37,11 @@
   <label for="legacy-file">Earlier log (.txt)</label>
   <input id="legacy-file" type="file" accept=".txt,text/plain">
 
+  <p>Or restore a CycleLog file you saved earlier — an encrypted backup, or a
+     data export. For an encrypted backup, type the passphrase it was made with.</p>
+  <label for="restore-file">CycleLog backup or data export (.json)</label>
+  <input id="restore-file" type="file" accept=".json,application/json">
+
   <button id="create" type="button">Create my vault</button>
   <p id="setup-progress" role="status"></p>
   <p id="setup-error" role="alert"></p>
@@ -67,6 +72,7 @@
     <button id="export-data" type="button" class="secondary">Download data (JSON)</button>
     <button id="export-days" type="button" class="secondary">Download days (CSV)</button>
     <button id="export-cycles" type="button" class="secondary">Download cycles (CSV)</button>
+    <p id="last-backup" role="status"></p>
     <p id="export-error" role="alert"></p>
   </section>
 

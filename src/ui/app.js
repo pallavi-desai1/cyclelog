@@ -13,6 +13,10 @@ import {
   FILENAMES, backupBundle, documentJson, daysCsv, cyclesCsv,
 } from '../export.js';
 import {
+  classifyRestoreFile, parseBackupBundle, restoreBackup,
+  markBackup, readLastBackup, requestPersistentStorage,
+} from '../restore.js';
+import {
   monthGrid, monthOf, shiftMonth, projectedDates, monthRange, clampMonth,
 } from '../calendar.js';
 import { dayDetail } from '../day.js';
@@ -148,6 +152,7 @@ async function paint(note = '') {
   say('import-notice', note);
   viewMonth = monthOf(localToday());
   selectedDate = null;
+  showLastBackup();
   drawCalendar();
   screen('app');
 }
@@ -367,6 +372,15 @@ function jumpToPickedMonth() {
 
 // Spec §9: a Blob, never a network call. The link is created, clicked and
 // revoked in one go, so nothing is left holding the data.
+// Her only protection against a lost phone is a backup she actually took,
+// so the date of the last one is on screen rather than in her memory.
+async function showLastBackup() {
+  const last = await readLastBackup(backend);
+  say('last-backup', last === null
+    ? 'No backup yet — download one and keep it somewhere safe.'
+    : `Last backup: ${last}`);
+}
+
 function download(filename, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const link = document.createElement('a');
@@ -390,6 +404,8 @@ async function exportBackup() {
       backupBundle({ meta, vault, exportedAt: localToday() }),
       'application/json',
     );
+    await markBackup(backend, localToday());
+    await showLastBackup();
   } catch {
     say('export-error', 'That download did not start. Please try again.');
   }
@@ -470,12 +486,53 @@ async function create() {
     say('setup-error', '');
     say('setup-progress', 'Reading your files…');
 
+    // A CycleLog file she saved earlier takes precedence: it is a restore,
+    // not an import, and an encrypted backup carries its own key material.
+    const restoreText = await readFile(el('restore-file'), false);
+    const restoreKind = restoreText === null ? 'none' : classifyRestoreFile(restoreText);
+    if (restoreText !== null) {
+      if (restoreKind === 'unknown') {
+        return say('setup-error',
+          'That file is not a CycleLog backup or data export. For a Clue '
+          + 'export or your old text log, use the pickers above.');
+      }
+      if (restoreKind === 'backup') {
+        try {
+          await restoreBackup(backend, parseBackupBundle(restoreText));
+        } catch {
+          say('setup-progress', '');
+          return say('setup-error', 'That backup could not be read.');
+        }
+        // The backup brought its own wrapped key, so the ordinary unlock path
+        // opens it — with the passphrase it was made with, which is what she
+        // typed on this form.
+        const opened = await vault.unlock(passphrase);
+        if (!opened.ok) {
+          say('setup-progress', '');
+          return say('setup-error',
+            'The backup was restored, but that passphrase did not open it. '
+            + 'Try the passphrase you used when you made the backup.');
+        }
+        hasVault = true;
+        clear('setup-passphrase');
+        clear('setup-confirm');
+        say('setup-progress', '');
+        await paint('Restored from your backup.');
+        return undefined;
+      }
+    }
+
     let vaultDoc;
     let importNote = '';
     try {
       const clueJson = await readFile(el('clue-file'), true);
       const legacyText = await readFile(el('legacy-file'), false);
-      if (clueJson || legacyText) {
+      if (restoreKind === 'document') {
+        // A plaintext data export is the document itself, carrying no key
+        // material: seal it under the passphrase she just chose.
+        vaultDoc = parseDocument(restoreText);
+        importNote = describeImport({ doc: vaultDoc, warnings: [] });
+      } else if (clueJson || legacyText) {
         const imported = documentFromSources({ clueJson, legacyText });
         vaultDoc = imported.doc;
         importNote = describeImport(imported);
@@ -592,6 +649,9 @@ async function offerFaceId() {
 }
 
 async function start() {
+  // Without this the browser may treat the vault as cache and evict it. It is
+  // a request, not a guarantee, and a refusal changes nothing else.
+  requestPersistentStorage();
   try {
     const status = await vault.status();
     hasVault = status !== 'empty';

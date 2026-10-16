@@ -814,3 +814,49 @@ describe('export', () => {
     }
   });
 });
+
+describe('restore and storage durability', () => {
+  it('offers a restore picker on the setup screen', () => {
+    expect(html()).toContain('id="restore-file"');
+    expect(html()).toMatch(/id="restore-file"[^>]*accept="[^"]*\.json/);
+  });
+
+  it('classifies the picked file rather than guessing from its name', () => {
+    expect(app()).toContain('classifyRestoreFile(');
+  });
+
+  it('restores an encrypted backup through the tested path', () => {
+    const body = functionBody(app(), 'create');
+    expect(body).toMatch(/parseBackupBundle\(/);
+    expect(body).toMatch(/restoreBackup\(/);
+  });
+
+  // A backup carries its own key material, so the passphrase that opens it is
+  // the one it was made with — not whatever she typed into the setup form.
+  it('opens a restored backup with the passphrase typed on the form', () => {
+    const body = functionBody(app(), 'create');
+    const restore = body.indexOf('restoreBackup(');
+    const unlock = body.indexOf('vault.unlock(');
+    expect(restore).toBeGreaterThan(-1);
+    expect(unlock).toBeGreaterThan(restore);
+  });
+
+  it('treats a plaintext data export as a document to seal under a new passphrase', () => {
+    const body = functionBody(app(), 'create');
+    expect(body).toMatch(/'document'/);
+    expect(body).toMatch(/parseDocument\(/);
+  });
+
+  it('asks the browser to keep the vault rather than treat it as cache', () => {
+    expect(app()).toContain('requestPersistentStorage(');
+  });
+
+  it('records when a backup was taken, and shows it', () => {
+    expect(functionBody(app(), 'exportBackup')).toMatch(/markBackup\(/);
+    expect(app()).toMatch(/readLastBackup\(/);
+  });
+
+  it('says plainly when no backup has ever been taken', () => {
+    expect(app()).toMatch(/No backup yet|never backed up/i);
+  });
+});
