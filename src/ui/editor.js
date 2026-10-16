@@ -126,18 +126,24 @@ export function patchFromValues(values) {
 
 // A save's write to the vault always lands — one seal(), one whole-document
 // write, never a merge. What varies is what the *view* may do once it does,
-// and that needs three answers, not two:
-//   - 'abandon': the vault locked while the write was in flight. The epoch
-//     (bumped only by returnToLock) moved, so the decrypted document must
-//     not come back into memory at all; the next unlock reads it fresh.
-//   - 'adopt-only': the vault did not lock, but a different day (or none) is
-//     open now. The vault holds `next`, so memory must too, or the next
-//     save would compute from a stale base and silently overwrite this
-//     one's write — but her screen belongs to another day and must not
-//     repaint.
-//   - 'adopt-and-render': nothing moved. Memory and the screen both update.
-export function saveOutcome({ epochAtStart, epochNow, editing, date }) {
+// and that needs three answers, not two. The second check compares SESSION
+// tokens, not the date being edited: two sessions opened back-to-back on the
+// same day (open X, Save pending, Cancel, reopen X, type new values) share a
+// date but are not the same editor, and only a token distinguishes them.
+//   - 'abandon': the vault locked while the write was in flight. epochNow
+//     (bumped only by returnToLock) has moved, so the decrypted document
+//     must not come back into memory at all; the next unlock reads it fresh.
+//   - 'adopt-only': the vault did not lock, but a different editor session is
+//     open now — a different day, no day, or a fresh session on the same
+//     day. The vault holds `next`, so memory must too, or the next save
+//     would compute from a stale base and silently overwrite this one's
+//     write — but the session on screen is not this save's and must not be
+//     repainted.
+//   - 'adopt-and-render': neither moved. Memory and the screen both update —
+//     this covers Cancel-with-no-reopen too: the panel is showing the day
+//     read-only, and repainting it with what was just saved is correct.
+export function saveOutcome({ epochAtStart, epochNow, sessionAtStart, sessionNow }) {
   if (epochAtStart !== epochNow) return 'abandon';
-  if (editing !== date) return 'adopt-only';
+  if (sessionAtStart !== sessionNow) return 'adopt-only';
   return 'adopt-and-render';
 }

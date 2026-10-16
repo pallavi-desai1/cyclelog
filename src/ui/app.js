@@ -95,6 +95,14 @@ let editing = null;
 // must not share this counter.
 let sessionEpoch = 0;
 
+// The editor's own identity, independent of `editing` (which holds a date,
+// not a session). Two sessions opened back-to-back on the SAME day are
+// otherwise indistinguishable by date alone: open day X, Save (pending),
+// Cancel, reopen day X, type new values — the pending save's `date` still
+// equals `editing` when it resolves, even though it is a different editor
+// from the one on screen. Bumped only here, in openEditor, on every open.
+let editSession = 0;
+
 // A real lock on saveDay itself, not just the button's `disabled` attribute:
 // the panel is re-rendered by Cancel/openEditor mid-save, which would hand a
 // second call a brand-new, enabled button while the first save is still
@@ -166,11 +174,14 @@ function selectDay(date) {
 
 function openEditor(date) {
   if (openDoc === null) return;
-  // `editing` alone is what a pending save checks to see whether its day is
-  // still the one open (see saveOutcome in editor.js). Opening a different
-  // editor is not a lock — the save in flight still needs to land in
-  // memory — so the lock-generation counter stays untouched here.
   editing = date;
+  // A fresh session, even over the same day: a save still pending from
+  // whatever was open before this must be able to tell it is no longer the
+  // editor on screen, which the date in `editing` alone cannot distinguish
+  // from a second session on the same day. Opening a different editor is
+  // not a lock, though — the save in flight still needs to land in memory —
+  // so this is a separate counter from the one the lock screen bumps.
+  editSession += 1;
   el('day-detail').innerHTML = renderEditor(dayDetail(openDoc, date, {
     todayISO: localToday(),
     adaptedDate: openSummary.adapted.date,
@@ -217,6 +228,7 @@ async function saveDay() {
   if (button !== null) button.disabled = true;
   const date = editing;
   const epoch = sessionEpoch;
+  const session = editSession;
   try {
     const { flow, patch, approximate } = patchFromValues(formValues());
     let next = setDayFields(openDoc, date, patch);
@@ -228,7 +240,9 @@ async function saveDay() {
     // looking at what is actually stored.
     await vault.save(serializeDocument(next));
 
-    const outcome = saveOutcome({ epochAtStart: epoch, epochNow: sessionEpoch, editing, date });
+    const outcome = saveOutcome({
+      epochAtStart: epoch, epochNow: sessionEpoch, sessionAtStart: session, sessionNow: editSession,
+    });
     // Locked while we were saving: the write landed and is correct, but the
     // decrypted document must not come back into memory. The next unlock
     // reads it from the vault.
@@ -239,7 +253,7 @@ async function saveDay() {
     // compute from a stale base and overwrite what this one just wrote.
     openDoc = next;
     openSummary = buildSummary(openDoc, localToday());
-    if (outcome === 'adopt-only') return; // her screen belongs to another day; leave it alone
+    if (outcome === 'adopt-only') return; // a different editor is open now; leave it alone
 
     el('summary').innerHTML = renderSummary(openSummary);
     drawCalendar();
@@ -249,7 +263,9 @@ async function saveDay() {
     // A failed save never reached the vault, so there is nothing for memory
     // to adopt — only whether this is still the visible form, to decide
     // whether writing to #edit-error would land on the right panel at all.
-    const outcome = saveOutcome({ epochAtStart: epoch, epochNow: sessionEpoch, editing, date });
+    const outcome = saveOutcome({
+      epochAtStart: epoch, epochNow: sessionEpoch, sessionAtStart: session, sessionNow: editSession,
+    });
     if (outcome !== 'adopt-and-render') return;
     const errorField = document.getElementById('edit-error');
     if (errorField !== null) {

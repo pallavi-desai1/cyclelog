@@ -463,6 +463,36 @@ describe('editing a day', () => {
     expect(functionBody(app(), 'openEditor')).not.toMatch(/sessionEpoch/);
   });
 
+  // Critical 2 (review, round 3): `editing` holds a date, not a session
+  // identity, so two sessions opened back-to-back on the SAME day (open X,
+  // Save pending, Cancel, reopen X, type new values) are otherwise
+  // indistinguishable by date alone when the first save resolves. A real
+  // token, bumped on every open, is what tells them apart.
+  it('gives every fresh editor its own session token', () => {
+    expect(functionBody(app(), 'openEditor')).toMatch(/editSession \+= 1;/);
+  });
+
+  it('captures the session token before the first await, alongside the epoch', () => {
+    const body = functionBody(app(), 'saveDay');
+    const sessionCaptureIndex = body.indexOf('const session = editSession;');
+    const awaitIndex = body.indexOf('await vault.save');
+    expect(sessionCaptureIndex, 'const session = editSession;').toBeGreaterThan(-1);
+    expect(sessionCaptureIndex).toBeLessThan(awaitIndex);
+  });
+
+  // The date dropped out of saveOutcome entirely in round 3 — a session
+  // token implies its date, and only the token can tell two sessions on the
+  // same day apart. Pin that saveDay passes tokens, not editing/date.
+  it('calls saveOutcome with both session tokens, not with editing/date', () => {
+    const body = functionBody(app(), 'saveDay');
+    for (const [, call] of body.matchAll(/saveOutcome\(\{([^}]*)\}\)/g)) {
+      expect(call).toMatch(/sessionAtStart:\s*session/);
+      expect(call).toMatch(/sessionNow:\s*editSession/);
+      expect(call).not.toMatch(/\bediting\b/);
+      expect(call).not.toMatch(/\bdate\b/);
+    }
+  });
+
   // Critical 2 (review, round 2): the data-loss mechanism after round 1's
   // fix was that openDoc was only resynced when the save was still the
   // visible session — so a superseded save's write landed in the vault but

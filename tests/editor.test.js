@@ -202,40 +202,49 @@ describe('patchFromValues', () => {
 });
 
 // vault.save awaits two IndexedDB round trips (seal(), then backend.set()),
-// so the session can move on — a lock, or a different day opened in the
-// editor — before a pending save resolves. The write always lands in the
-// vault; this function only decides what the *view* may do once it has.
+// so the session can move on — a lock, or a fresh editor session — before a
+// pending save resolves. The write always lands in the vault; this function
+// only decides what the *view* may do once it has. The session check
+// compares a TOKEN (editSession in app.js), not the date being edited: two
+// sessions opened back-to-back on the same day (open X, Save pending,
+// Cancel, reopen X) share a date but are not the same editor.
 describe('saveOutcome', () => {
-  it('renders when the epoch has not moved and the same day is still open', () => {
+  it('renders when the epoch and the session token have not moved', () => {
     expect(saveOutcome({
-      epochAtStart: 1, epochNow: 1, editing: '2015-03-01', date: '2015-03-01',
+      epochAtStart: 1, epochNow: 1, sessionAtStart: 1, sessionNow: 1,
     })).toBe('adopt-and-render');
   });
 
   it('abandons once the epoch has moved — the vault locked mid-save', () => {
     expect(saveOutcome({
-      epochAtStart: 1, epochNow: 2, editing: '2015-03-01', date: '2015-03-01',
+      epochAtStart: 1, epochNow: 2, sessionAtStart: 1, sessionNow: 1,
     })).toBe('abandon');
   });
 
-  // A locked session wins even when the editing date still happens to
-  // match: the lock is what makes the decrypted document unsafe to hold,
-  // regardless of which day was open when it fired.
-  it('abandons on a moved epoch even when the editing date still matches', () => {
+  // A locked session wins even when the editor session token still happens
+  // to match: the lock is what makes the decrypted document unsafe to hold,
+  // regardless of which editor was open when it fired.
+  it('abandons on a moved epoch even when the session token still matches', () => {
     expect(saveOutcome({
-      epochAtStart: 1, epochNow: 2, editing: '2015-03-01', date: '2015-03-01',
+      epochAtStart: 1, epochNow: 2, sessionAtStart: 1, sessionNow: 1,
     })).toBe('abandon');
   });
 
-  it('adopts into memory only, without rendering, when a different day is open now', () => {
+  it('adopts into memory only, without rendering, once the session token has moved', () => {
+    // Covers both a different day opened and the same day reopened after
+    // Cancel — openEditor bumps the token on every open, so either case
+    // looks identical to this function: a fresh session, not this one.
     expect(saveOutcome({
-      epochAtStart: 1, epochNow: 1, editing: '2015-03-02', date: '2015-03-01',
+      epochAtStart: 1, epochNow: 1, sessionAtStart: 1, sessionNow: 2,
     })).toBe('adopt-only');
   });
 
-  it('adopts into memory only when the editor was cancelled (editing is null)', () => {
+  // Cancel alone (no reopen) does NOT bump the token — the panel is simply
+  // showing the day read-only now. Repainting it with what was just saved
+  // is the correct, honest result, so this must still render.
+  it('still renders after a Cancel with no reopen, because the token never moved', () => {
     expect(saveOutcome({
-      epochAtStart: 1, epochNow: 1, editing: null, date: '2015-03-01',
-    })).toBe('adopt-only');
+      epochAtStart: 1, epochNow: 1, sessionAtStart: 3, sessionNow: 3,
+    })).toBe('adopt-and-render');
   });
 });
