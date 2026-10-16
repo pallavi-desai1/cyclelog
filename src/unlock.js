@@ -132,7 +132,16 @@ export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOC
 
     async save(documentString) {
       requireUnlocked();
-      await saveDocument(backend, dataKey, documentString);
+      // dataKey is captured before the write, not read again after it: a
+      // lock arriving while saveDocument is in flight sets dataKey to null,
+      // and writing the decrypted document back into `plaintext` after that
+      // would put it back in memory on top of a lock that has nothing to do
+      // with this save. The write to storage still completes either way —
+      // the vault is the authority — only this module's own memory declines
+      // to come back.
+      const key = dataKey;
+      await saveDocument(backend, key, documentString);
+      if (dataKey !== key) return;
       plaintext = documentString;
       lastTouch = now();
     },

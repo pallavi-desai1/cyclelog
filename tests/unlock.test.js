@@ -162,6 +162,30 @@ describe('save', () => {
     vault.lock();
     await expect(vault.save(OTHER)).rejects.toThrow(/locked/);
   });
+
+  // Important 2 (final branch review): save() used to write the decrypted
+  // document back into `plaintext` unconditionally after the await, even
+  // if lock() ran while that write was still in flight — putting the whole
+  // decrypted document back in memory on top of a lock that had nothing to
+  // do with this save.
+  it('does not put the decrypted document back in memory if locked while the write was in flight', async () => {
+    const { vault } = fresh();
+    await vault.setup('correct horse', DOC);
+    const pending = vault.save(OTHER);
+    vault.lock();
+    await pending;
+    expect(vault.read()).toBeNull();
+  });
+
+  it('still completes the write to storage even though a lock mid-save keeps memory from adopting it', async () => {
+    const { vault } = fresh();
+    await vault.setup('correct horse', DOC);
+    const pending = vault.save(OTHER);
+    vault.lock();
+    await pending;
+    await vault.unlock('correct horse');
+    expect(vault.read()).toBe(OTHER);
+  });
 });
 
 describe('idle locking', () => {
