@@ -159,6 +159,97 @@ describe('theme', () => {
   });
 });
 
+describe('summary card styling', () => {
+  // renderSummary (src/ui/render.js) emits these exact classes. Before this
+  // fix, theme.css had no rule for any of them, so the card rendered as
+  // default-styled paragraphs rather than the baby-pink card the spec asks
+  // for. A rule "has" a class if that class, or that class in combination
+  // with others via a compound/descendant selector, is used as a selector
+  // somewhere in the stylesheet.
+  function hasRuleFor(className) {
+    const selectorLine = new RegExp(
+      `(^|[\\s,}])\\.${className}(?=[\\s,.:{])`,
+    );
+    // Strip out comments so a class name mentioned only in prose doesn't
+    // count as a styled selector.
+    const withoutComments = css().replace(/\/\*[\s\S]*?\*\//g, '');
+    return selectorLine.test(withoutComments);
+  }
+
+  it('styles every class the renderer emits', () => {
+    for (const className of [
+      'card', 'headline', 'since', 'label', 'value', 'counterfactual',
+      'late', 'no-period', 'on-time', 'unavailable',
+    ]) {
+      expect(hasRuleFor(className), `.${className}`).toBe(true);
+    }
+  });
+
+  it('builds the card on the surface token with the border and radius tokens', () => {
+    const match = css().match(/\.card\s*\{([^}]*)\}/);
+    expect(match, '.card rule').not.toBeNull();
+    const body = match[1];
+    expect(body).toMatch(/background:\s*var\(--surface\)/);
+    expect(body).toMatch(/border(-\w+)?:.*var\(--border\)/);
+    expect(body).toMatch(/border-radius:\s*var\(--radius\)/);
+  });
+
+  it('gives the counterfactual a dashed treatment, distinct from a solid prediction line', () => {
+    const match = css().match(/\.counterfactual\s*\{([^}]*)\}/);
+    expect(match, '.counterfactual rule').not.toBeNull();
+    expect(match[1]).toMatch(/dashed/);
+  });
+
+  it('mutes the label against the value', () => {
+    // Not asserting a specific opacity/colour value, just that the two are
+    // not styled identically — a muted label is the whole point.
+    const labelMatch = css().match(/\.label\s*\{([^}]*)\}/);
+    const valueMatch = css().match(/\.value\s*\{([^}]*)\}/);
+    expect(labelMatch, '.label rule').not.toBeNull();
+    expect(valueMatch, '.value rule').not.toBeNull();
+    expect(labelMatch[1].trim()).not.toBe(valueMatch[1].trim());
+  });
+});
+
+// Extracts the balanced-brace body following the first match of `marker`.
+function balancedBodyAfter(text, marker) {
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex === -1) return null;
+  const braceStart = text.indexOf('{', markerIndex);
+  let depth = 0;
+  for (let i = braceStart; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) return text.slice(braceStart + 1, i);
+    }
+  }
+  return null;
+}
+
+describe('dark-mode button contrast', () => {
+  it('does not pair a white label with the dark-mode interactive fill', () => {
+    // #FFFFFF text on dark mode's --interactive (#E8799C) is ~2.76:1,
+    // below the 3:1 bar for UI components. Somewhere inside a dark-mode
+    // media block, button's color must be overridden away from white.
+    const text = css();
+    let found = false;
+    let searchFrom = 0;
+    for (;;) {
+      const markerIndex = text.indexOf('@media (prefers-color-scheme: dark)', searchFrom);
+      if (markerIndex === -1) break;
+      const body = balancedBodyAfter(text.slice(markerIndex), '@media (prefers-color-scheme: dark)');
+      searchFrom = markerIndex + 1;
+      if (body === null) continue;
+      const buttonRule = balancedBodyAfter(body, 'button');
+      if (buttonRule !== null && /color:\s*(?!#FFFFFF|white)\S/i.test(buttonRule)) {
+        found = true;
+      }
+    }
+    expect(found, 'a dark-mode button rule overriding color away from white').toBe(true);
+  });
+});
+
 describe('service worker', () => {
   it('versions its cache name', () => {
     expect(sw()).toMatch(/const CACHE_VERSION = '[^']+'/);

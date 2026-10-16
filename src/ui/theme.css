@@ -33,6 +33,12 @@
     --interactive: #E8799C;
     --baseline: #C9B6E4;
   }
+
+  /* #FFFFFF on #E8799C is ~2.76:1 — below the 3:1 bar for UI components.
+     A dark label on the lightened dark-mode fill clears it. */
+  button {
+    color: #241820;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -77,6 +83,57 @@ button {
 button[hidden] { display: none; }
 
 #lock-error { color: var(--warning); min-height: 1.45em; margin: 0; }
+
+/* The summary card (renderSummary, src/ui/render.js) — a card, not a design
+   system, so this stays small: one rule per class it actually emits. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+/* Spec §10.2: the headline is the largest text on the card. */
+.headline h2 {
+  font-size: 1.6em;
+  line-height: 1.2;
+}
+
+.late h2, .no-period h2 { color: var(--warning); }
+.on-time h2 { color: var(--positive); }
+.unavailable h2 { color: var(--text); }
+
+.since {
+  margin-top: 0;
+  color: var(--text);
+  opacity: 0.75;
+}
+
+.label {
+  color: var(--text);
+  opacity: 0.65;
+  margin-right: 0.3em;
+}
+
+.value {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Spec §10.3: the adapted prediction reads as a solid line, the
+   counterfactual as a dashed one — and labelled in words too (see
+   render.js), so the distinction survives colour blindness. */
+.predictions p {
+  border-left: 3px solid var(--interactive);
+  padding-left: 0.6em;
+}
+
+.counterfactual {
+  border-left: 3px dashed var(--baseline);
+  padding-left: 0.6em;
+  color: var(--baseline);
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
