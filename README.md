@@ -88,6 +88,18 @@ on that device, and the portrait layout — happens after the app is published
 to GitHub Pages, since a secure context is required and a LAN address does
 not qualify.
 
+**No backup yet, and no erase button yet.** The export screen (spec §9) is a
+later plan's scope. Until it ships, this app has no way to get your history
+back out once it is in the vault, and no in-app way to erase or reset it.
+Keep the original Clue export and the legacy `.txt` log somewhere safe — the
+passphrase is the only key, and without it the vault cannot be opened or
+recovered, so those source files are the only backup you have in the
+meantime. If the vault is ever wrong, or you forget the passphrase, there is
+no reset button in the app yet: clear the site's data for this page from
+Safari's settings (Settings → Safari → Advanced → Website Data, or Settings →
+Apps → Safari → Advanced → Website Data on newer iOS), then reload the page
+and set it up again from your kept source files.
+
 ## Design documents
 
 - Spec: `docs/superpowers/specs/2026-10-11-cyclelog-design.md`
