@@ -216,9 +216,13 @@ export function renderDay(detail) {
   }
 
   // Spec §10.1: imported entries are marked, and approximate dates say so —
-  // a date she is unsure of should not read as a measurement.
+  // a date she is unsure of should not read as a measurement. Her own
+  // entries (source 'manual') are not an import and must not read as one —
+  // "imported from manual" is nonsense on a day she typed herself.
   const provenance = [];
-  if (detail.source) provenance.push(`imported from ${escapeHtml(detail.source)}`);
+  if (detail.source && detail.source !== 'manual') {
+    provenance.push(`imported from ${escapeHtml(detail.source)}`);
+  }
   if (detail.isApproximate) provenance.push('date is approximate');
   if (provenance.length > 0) {
     parts.push(`<p class="day-source">${provenance.join(', ')}</p>`);

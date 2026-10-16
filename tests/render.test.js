@@ -284,6 +284,14 @@ describe('the day panel', () => {
     expect(html).toMatch(/approximate/i);
   });
 
+  // Important 5 (final review): 'manual' (src/edit.js's EDIT_SOURCE) is not
+  // an import — it is what every entry she has typed herself carries.
+  // "imported from manual" is nonsense on a day she wrote herself.
+  it('does not call her own entry an import', () => {
+    const html = renderDay(detail({ source: 'manual' }));
+    expect(html).not.toMatch(/imported/i);
+  });
+
   it('says a period is expected on that day', () => {
     expect(renderDay(detail({ predicted: true }))).toMatch(/period expected/i);
   });
