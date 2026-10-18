@@ -27,6 +27,7 @@ const PRECACHE = [
   'src/summary.js',
   'src/sync/key.js',
   'src/sync/scope.js',
+  'src/sync/firestore.js',
   'src/calendar.js',
   'src/day.js',
   'src/importers/clue.js',
