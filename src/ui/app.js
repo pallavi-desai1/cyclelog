@@ -241,6 +241,7 @@ function formValues() {
     pms: el('edit-pms').checked,
     mood: checked('mood'),
     pain: checked('pain'),
+    medicine: checked('medicine'),
     ovulation: el('edit-ovulation').value,
     pregnancy: el('edit-pregnancy').value,
     notes: el('edit-notes').value,

@@ -6,7 +6,7 @@ const SCALAR_FIELDS = ['flow', 'cramps', 'spotting', 'discharge'];
 // can assert this set stays in lockstep with blankDay's shape — a field added
 // to one and not the other would silently inherit the loser's stale value
 // through mergeDay's `{ ...loser }` spread, with no error.
-export const MERGE_DAY_FIELDS = [...SCALAR_FIELDS, 'tests', 'mood', 'pain', 'pms', 'notes', 'source', 'precision'];
+export const MERGE_DAY_FIELDS = [...SCALAR_FIELDS, 'tests', 'mood', 'pain', 'medicine', 'pms', 'notes', 'source', 'precision'];
 
 function rank(source) {
   return PRECEDENCE[source] ?? 0;
@@ -58,6 +58,7 @@ function mergeDay(existing, incoming, date, conflicts) {
   };
   merged.mood = [...new Set([...(existing.mood ?? []), ...(incoming.mood ?? [])])];
   merged.pain = [...new Set([...(existing.pain ?? []), ...(incoming.pain ?? [])])];
+  merged.medicine = [...new Set([...(existing.medicine ?? []), ...(incoming.medicine ?? [])])];
   merged.pms = Boolean(existing.pms) || Boolean(incoming.pms);
   merged.notes = mergeNotes(winner.notes, loser.notes);
   merged.source = winner.source;

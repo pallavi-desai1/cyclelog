@@ -5,7 +5,7 @@ import { blankDay } from './importers/clue.js';
 // clue above legacy, so a future re-import cannot overwrite what she typed.
 export const EDIT_SOURCE = 'manual';
 
-const LIST_FIELDS = ['mood', 'pain'];
+const LIST_FIELDS = ['mood', 'pain', 'medicine'];
 
 export function spanCovering(spans, dateISO) {
   for (const span of spans) {
@@ -25,6 +25,7 @@ function isEmpty(day) {
     && day.pms !== true
     && day.mood.length === 0
     && day.pain.length === 0
+    && (day.medicine ?? []).length === 0
     && day.notes === ''
     && day.tests.ovulation === null
     && day.tests.pregnancy === null;
@@ -44,6 +45,7 @@ function dayAt(doc, dateISO) {
     ...existing,
     mood: [...(existing.mood ?? [])],
     pain: [...(existing.pain ?? [])],
+    medicine: [...(existing.medicine ?? [])],
     tests: { ...existing.tests },
   };
 }

@@ -13,7 +13,7 @@ export const FILENAMES = {
 
 const DAY_HEADER = [
   'date', 'flow', 'cramps', 'spotting', 'pms', 'discharge',
-  'ovulation_test', 'pregnancy_test', 'mood', 'pain', 'notes',
+  'ovulation_test', 'pregnancy_test', 'mood', 'pain', 'medicine', 'notes',
   'source', 'date_precision',
 ];
 
@@ -56,6 +56,7 @@ export function daysCsv(doc) {
       day.tests ? day.tests.pregnancy : null,
       list(day.mood),
       list(day.pain),
+      list(day.medicine),
       day.notes === '' ? null : day.notes,
       day.source,
       day.precision,

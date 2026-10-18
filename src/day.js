@@ -31,6 +31,7 @@ function loggedItems(entry) {
   add('Ovulation test', entry.tests ? entry.tests.ovulation : null);
   add('Pregnancy test', entry.tests ? entry.tests.pregnancy : null);
   add('Pain', (entry.pain ?? []).join(', '));
+  add('Medicine', (entry.medicine ?? []).join(', '));
   add('Notes', entry.notes);
 
   return items;

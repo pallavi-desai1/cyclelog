@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  FLOW_OPTIONS, CRAMP_OPTIONS, MOOD_OPTIONS, PAIN_OPTIONS,
+  FLOW_OPTIONS, CRAMP_OPTIONS, MOOD_OPTIONS, PAIN_OPTIONS, MEDICINE_OPTIONS,
   SPOTTING_OPTIONS, DISCHARGE_OPTIONS, TEST_OPTIONS,
   renderEditor, patchFromValues, saveOutcome,
 } from '../src/ui/editor.js';
@@ -183,7 +183,7 @@ describe('renderEditor', () => {
 describe('patchFromValues', () => {
   const values = (overrides = {}) => ({
     flow: '', cramps: '', spotting: '', discharge: '', pms: false,
-    mood: [], pain: [], ovulation: '', pregnancy: '', notes: '', approximate: false,
+    mood: [], pain: [], medicine: [], ovulation: '', pregnancy: '', notes: '', approximate: false,
     ...overrides,
   });
 
@@ -283,5 +283,66 @@ describe('saveOutcome', () => {
     expect(saveOutcome({
       epochAtStart: 1, epochNow: 1, sessionAtStart: 3, sessionNow: 3,
     })).toBe('adopt-and-render');
+  });
+});
+
+describe('the medicine field', () => {
+  it('offers the three she asked for', () => {
+    expect(MEDICINE_OPTIONS.map(option => option.value))
+      .toEqual(['ibuprofen', 'tylenol', 'paracetamol']);
+  });
+
+  it('labels them readably', () => {
+    for (const option of MEDICINE_OPTIONS) {
+      expect(option.label, option.value).toMatch(/^[A-Z]/);
+    }
+  });
+
+  it('renders a checkbox group on the form', () => {
+    const html = renderEditor(detail('2015-03-01'));
+    expect(html).toContain('name="medicine"');
+    expect(html).toContain('Ibuprofen');
+  });
+
+  it('ticks what was already recorded', () => {
+    const taken = {
+      ...doc,
+      days: { '2015-03-01': { ...doc.days['2015-03-01'], medicine: ['ibuprofen'] } },
+    };
+    const html = renderEditor(dayDetail(taken, '2015-03-01', { todayISO: '2015-03-10' }));
+    expect(html).toMatch(/value="ibuprofen"[^>]*checked/);
+    expect(html).not.toMatch(/value="tylenol"[^>]*checked/);
+  });
+
+  it('carries it back out through the patch', () => {
+    const { patch } = patchFromValues({
+      flow: '', cramps: '', spotting: '', discharge: '', pms: false,
+      mood: [], pain: [], medicine: ['ibuprofen', 'tylenol'],
+      ovulation: '', pregnancy: '', notes: '', approximate: false,
+    });
+    expect(patch.medicine).toEqual(['ibuprofen', 'tylenol']);
+  });
+});
+
+describe('the vocabulary she changed', () => {
+  it('offers tired and crying as moods', () => {
+    const values = MOOD_OPTIONS.map(option => option.value);
+    expect(values).toContain('tired');
+    expect(values).toContain('crying');
+  });
+
+  it('no longer offers nausea as a pain', () => {
+    expect(PAIN_OPTIONS.map(option => option.value)).not.toContain('nausea');
+  });
+
+  // An entry recorded before the change must still show, or editing an old
+  // day would quietly erase it.
+  it('still shows a recorded value that is no longer on the list', () => {
+    const old = {
+      ...doc,
+      days: { '2015-03-01': { ...doc.days['2015-03-01'], pain: ['nausea'] } },
+    };
+    const html = renderEditor(dayDetail(old, '2015-03-01', { todayISO: '2015-03-10' }));
+    expect(html).toMatch(/value="nausea"[^>]*checked/);
   });
 });

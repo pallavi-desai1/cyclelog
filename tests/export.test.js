@@ -98,7 +98,7 @@ describe('daysCsv', () => {
   it('names every field in the header', () => {
     expect(cells(rows(csv())[0])).toEqual([
       'date', 'flow', 'cramps', 'spotting', 'pms', 'discharge',
-      'ovulation_test', 'pregnancy_test', 'mood', 'pain', 'notes',
+      'ovulation_test', 'pregnancy_test', 'mood', 'pain', 'medicine', 'notes',
       'source', 'date_precision',
     ]);
   });
@@ -123,7 +123,7 @@ describe('daysCsv', () => {
   it('joins a list without breaking the column', () => {
     const row = rows(csv()).find(line => line.startsWith('2015-01-29'));
     expect(row).toContain('sad; anxious');
-    expect(cells(row)).toHaveLength(13);
+    expect(cells(row)).toHaveLength(14);
   });
 
   it('escapes a note that contains a comma and a quote', () => {
@@ -131,7 +131,7 @@ describe('daysCsv', () => {
     expect(line).toContain('"ran 5k, felt ""fine"""');
     // And it reads back as the one value she typed, rather than as shifted
     // columns — which is the failure this escaping exists to prevent.
-    expect(cells(line)[10]).toBe('ran 5k, felt "fine"');
+    expect(cells(line)[11]).toBe('ran 5k, felt "fine"');
   });
 
   it('gives every row the same number of columns as the header', () => {
@@ -149,7 +149,7 @@ describe('daysCsv', () => {
 
   it('says where each entry came from', () => {
     const row = cells(rows(csv()).find(line => line.startsWith('2015-01-15')));
-    expect(row[11]).toBe('manual');
+    expect(row[12]).toBe('manual');
   });
 
   it('returns a header and nothing else for a document with no days', () => {

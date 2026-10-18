@@ -19,6 +19,7 @@ export function blankDay(source) {
     discharge: null,
     tests: { ovulation: null, pregnancy: null },
     pain: [],
+    medicine: [],
     notes: '',
     source,
     precision: 'exact',

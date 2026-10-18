@@ -402,3 +402,28 @@ describe('applyDayEdit', () => {
     expect(after.spans).toEqual(before.spans);
   });
 });
+
+describe('medicine', () => {
+  it('is stored on the day', () => {
+    const after = setDayFields(doc(), '2015-03-01', { medicine: ['ibuprofen'] });
+    expect(after.days['2015-03-01'].medicine).toEqual(['ibuprofen']);
+  });
+
+  it('is copied, not shared with the patch', () => {
+    const medicine = ['ibuprofen'];
+    const after = setDayFields(doc(), '2015-03-01', { medicine });
+    medicine.push('tylenol');
+    expect(after.days['2015-03-01'].medicine).toEqual(['ibuprofen']);
+  });
+
+  it('keeps a day alive that holds nothing else', () => {
+    const after = setDayFields(doc(), '2015-03-01', { medicine: ['tylenol'] });
+    expect(after.days['2015-03-01']).toBeDefined();
+  });
+
+  it('lets a day be emptied when it is cleared', () => {
+    let after = setDayFields(doc(), '2015-03-01', { medicine: ['tylenol'] });
+    after = setDayFields(after, '2015-03-01', { medicine: [] });
+    expect(after.days['2015-03-01']).toBeUndefined();
+  });
+});

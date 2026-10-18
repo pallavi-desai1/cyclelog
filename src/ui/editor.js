@@ -29,12 +29,20 @@ export const MOOD_OPTIONS = [
   option('sad', 'Sad'), option('anxious', 'Anxious'), option('angry', 'Angry'),
   option('sensitive', 'Sensitive'), option('stressed', 'Stressed'),
   option('withdrawn', 'Withdrawn'), option('mood_swings', 'Mood swings'),
+  option('tired', 'Tired'), option('crying', 'Crying'),
 ];
 
 export const PAIN_OPTIONS = [
   option('headache', 'Headache'), option('breast_tenderness', 'Breast tenderness'),
   option('ovulation', 'Ovulation pain'), option('backache', 'Backache'),
-  option('nausea', 'Nausea'),
+];
+
+// Whether she took anything for it. Tylenol and paracetamol are the same drug
+// under two names; both are offered because both are what a person reaches
+// for the words of, and a log should record what she would say.
+export const MEDICINE_OPTIONS = [
+  option('ibuprofen', 'Ibuprofen'), option('tylenol', 'Tylenol'),
+  option('paracetamol', 'Paracetamol'),
 ];
 
 export const TEST_OPTIONS = [option('positive', 'Positive'), option('negative', 'Negative')];
@@ -100,6 +108,7 @@ export function renderEditor(detail) {
     select('edit-discharge', 'Discharge', DISCHARGE_OPTIONS, recorded(detail, 'Discharge')),
     checkboxes('mood', 'Mood', MOOD_OPTIONS, recordedList(detail, 'Mood')),
     checkboxes('pain', 'Pain', PAIN_OPTIONS, recordedList(detail, 'Pain')),
+    checkboxes('medicine', 'Medicine', MEDICINE_OPTIONS, recordedList(detail, 'Medicine')),
     select('edit-ovulation', 'Ovulation test', TEST_OPTIONS, recorded(detail, 'Ovulation test')),
     select('edit-pregnancy', 'Pregnancy test', TEST_OPTIONS, recorded(detail, 'Pregnancy test')),
     `<label class="edit-check"><input type="checkbox" id="edit-pms"`,
@@ -129,6 +138,7 @@ export function patchFromValues(values) {
       pms: values.pms === true,
       mood: [...values.mood],
       pain: [...values.pain],
+      medicine: [...values.medicine],
       tests: {
         ovulation: orNull(values.ovulation),
         pregnancy: orNull(values.pregnancy),
