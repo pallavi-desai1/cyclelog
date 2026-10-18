@@ -73,6 +73,23 @@ describe('signInAnonymously', () => {
     await expect(signInAnonymously({ apiKey: 'api-key', fetchImpl }))
       .rejects.toMatchObject({ kind: 'offline' });
   });
+
+  it('reports a plain 400 as unauthenticated, since identity toolkit 400s mean the credential is wrong', async () => {
+    const { fetchImpl } = stubFetch([{ status: 400, json: { error: { message: 'some other reason' } } }]);
+    await expect(signInAnonymously({ apiKey: 'api-key', fetchImpl }))
+      .rejects.toMatchObject({ kind: 'unauthenticated' });
+  });
+
+  // Number('-0') is finite, so a naive guard would let a signed zero through.
+  // expect(-0).toBe(0) would not catch that — only Object.is distinguishes them.
+  it('normalises a -0 expiry to 0 rather than leaking a signed zero', async () => {
+    const { fetchImpl } = stubFetch([
+      ok({ localId: 'new-uid', idToken: 'id', refreshToken: 'refresh', expiresIn: '-0' }),
+    ]);
+    const result = await signInAnonymously({ apiKey: 'api-key', fetchImpl });
+    expect(Object.is(result.expiresInSeconds, -0)).toBe(false);
+    expect(Object.is(result.expiresInSeconds, 0)).toBe(true);
+  });
 });
 
 describe('refreshIdToken', () => {
@@ -148,9 +165,26 @@ describe('putVault', () => {
       .rejects.toMatchObject({ kind: 'server', status: 500 });
   });
 
+  // Review fix: a Firestore 400 (malformed field, bad mask) is not a bad
+  // credential. The blanket 400 -> unauthenticated mapping belongs to the
+  // auth endpoints only, or she gets told to re-pair a device that is fine.
+  it('reports a malformed-request 400 as server, not unauthenticated, for a Firestore call', async () => {
+    const { fetchImpl } = stubFetch([{ status: 400, json: { error: { message: 'Invalid field path' } } }]);
+    await expect(putVault({ ...PROJECT, payload: PAYLOAD, fetchImpl }))
+      .rejects.toMatchObject({ kind: 'server', status: 400 });
+  });
+
   it('resolves quietly on success, since there is nothing to report', async () => {
     const { fetchImpl } = stubFetch([ok({})]);
     await expect(putVault({ ...PROJECT, payload: PAYLOAD, fetchImpl })).resolves.toBeUndefined();
+  });
+
+  it('encodes a uid containing path-sensitive characters into the owner document path', async () => {
+    const { fetchImpl, calls } = stubFetch([ok({})]);
+    await putVault({
+      projectId: 'cyclelog-test', idToken: 'id-token-123', ownerUid: 'owner/uid', payload: PAYLOAD, fetchImpl,
+    });
+    expect(calls[0].url).toContain('vaults/owner%2Fuid');
   });
 });
 
@@ -178,6 +212,24 @@ describe('getVault', () => {
     const { fetchImpl } = stubFetch([{ status: 403, json: { error: { message: 'denied' } } }]);
     await expect(getVault({ ...PROJECT, fetchImpl })).rejects.toMatchObject({ kind: 'denied' });
   });
+
+  // Review fix: the decoder must be symmetric with the encoder. toFields
+  // throws on a type it cannot send; fromFields silently dropped a type it
+  // could not read, which would make ciphertext just vanish from the result
+  // instead of flagging the anomaly.
+  it('throws a typed error rather than silently dropping an unrecognised Firestore value type', async () => {
+    const { fetchImpl } = stubFetch([ok({
+      fields: {
+        ciphertext: { nullValue: null },
+        iv: { stringValue: 'BBBB' },
+        scope: { stringValue: 'dates' },
+        updatedAt: { stringValue: '2015-03-26' },
+        schemaVersion: { integerValue: '1' },
+      },
+    })]);
+    await expect(getVault({ ...PROJECT, fetchImpl }))
+      .rejects.toMatchObject({ name: 'SyncError', kind: 'server' });
+  });
 });
 
 describe('viewer grants', () => {
@@ -196,6 +248,14 @@ describe('viewer grants', () => {
     await revokeViewer({ ...PROJECT, viewerUid: 'viewer-uid', fetchImpl });
     expect(calls[0].method).toBe('DELETE');
     expect(calls[0].url).toContain('/vaults/owner-uid/viewers/viewer-uid');
+  });
+
+  it('encodes a viewer uid containing path-sensitive characters into the viewer document path', async () => {
+    const { fetchImpl, calls } = stubFetch([ok({})]);
+    await grantViewer({
+      ...PROJECT, viewerUid: 'viewer/uid', label: 'partner', grantedAt: '2015-03-26', fetchImpl,
+    });
+    expect(calls[0].url).toContain('viewers/viewer%2Fuid');
   });
 
   it('treats revoking a grant that is already gone as done', async () => {
@@ -217,5 +277,15 @@ describe('viewer grants', () => {
   it('returns an empty list when nobody is granted', async () => {
     const { fetchImpl } = stubFetch([ok({})]);
     expect(await listViewers({ ...PROJECT, fetchImpl })).toEqual([]);
+  });
+
+  // Review fix: a document with no name must not throw a raw TypeError —
+  // every failure here has to arrive as a typed SyncError.
+  it('reports a malformed viewer document as a typed error rather than throwing raw', async () => {
+    const { fetchImpl } = stubFetch([ok({
+      documents: [{ fields: { label: { stringValue: 'partner' }, grantedAt: { stringValue: '2015-03-26' } } } ],
+    })]);
+    await expect(listViewers({ ...PROJECT, fetchImpl }))
+      .rejects.toMatchObject({ name: 'SyncError', kind: 'server' });
   });
 });
