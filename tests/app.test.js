@@ -95,6 +95,7 @@ describe('app wiring', () => {
       'renderDay(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
       'renderMonthPicker({ month: viewMonth, range: monthRange(openDoc, localToday()), })',
       'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
+      "renderShareCard({ state, fingerprint: state.key === null ? '' : await fingerprint(state.key), ownerUid: state.identity === null ? null : state.identity.uid, })",
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
       expect(allowed).toContain(squash(expression));
@@ -197,7 +198,7 @@ describe('idle locking', () => {
     const helper = functionBody(text, 'returnToLock');
     const inHelper = (helper.match(/innerHTML = ''/g) || []).length;
     const everywhere = (text.match(/innerHTML = ''/g) || []).length;
-    expect(inHelper).toBe(3);             // the summary, the calendar and the day panel
+    expect(inHelper).toBe(4);             // the summary, the calendar, the day panel and the share card
     expect(helper).toMatch(/closePicker\(\)/);   // the picker, through its own helper
     // Those four are the only sites that clear rendered markup, so there is
     // exactly one place that can forget a pane.
@@ -858,5 +859,56 @@ describe('restore and storage durability', () => {
 
   it('says plainly when no backup has ever been taken', () => {
     expect(app()).toMatch(/No backup yet|never backed up/i);
+  });
+});
+
+describe('the owner side of sharing', () => {
+  it('has somewhere to put the share card', () => {
+    expect(html()).toContain('id="share"');
+  });
+
+  it('renders it through the tested renderer', () => {
+    expect(app()).toContain('renderShareCard(');
+  });
+
+  it('signs in anonymously rather than with Google', () => {
+    expect(app()).toContain('signInAnonymously(');
+    expect(app()).not.toMatch(/GoogleAuthProvider|accounts\.google\.com|gapi/);
+  });
+
+  it('loads no Firebase SDK', () => {
+    expect(app()).not.toMatch(/firebase\/app|firebase-app|firebase\.initializeApp/);
+    expect(html()).not.toMatch(/gstatic\.com|firebasejs/);
+  });
+
+  it('pushes through the tested payload builder, never a raw document', () => {
+    const body = functionBody(app(), 'pushShare');
+    expect(body, 'pushShare').not.toBeNull();
+    expect(body).toMatch(/buildPayload\(/);
+    expect(body).toMatch(/putVault\(/);
+    expect(body).not.toMatch(/serializeDocument\(/);
+  });
+
+  // Review Focus 3: the status she reads has to come from what happened.
+  it('records the outcome of every push, success or failure', () => {
+    const body = functionBody(app(), 'pushShare');
+    expect(body).toMatch(/withPushResult\(/);
+    expect(body).toMatch(/catch/);
+    expect(body).toMatch(/error\.kind|'offline'|'denied'/);
+  });
+
+  it('debounces the push rather than writing on every keystroke', () => {
+    expect(app()).toMatch(/PUSH_DEBOUNCE_MS/);
+    expect(app()).toMatch(/setTimeout\(/);
+  });
+
+  it('never blocks a save on the network', () => {
+    // The vault write is hers; the push is a courtesy to him.
+    const body = functionBody(app(), 'saveDay');
+    expect(body).not.toMatch(/await pushShare/);
+  });
+
+  it('drops the share card with everything else on lock', () => {
+    expect(functionBody(app(), 'returnToLock')).toMatch(/share'\)\.innerHTML = ''/);
   });
 });

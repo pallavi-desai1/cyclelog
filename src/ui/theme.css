@@ -444,3 +444,42 @@ input { font-family: var(--font-body); }
 .exports { margin-top: var(--gap); }
 .exports-note { font-size: 0.85em; opacity: 0.75; margin: 0 0 var(--gap); }
 #export-error { color: var(--warning); margin: 0; min-height: 1.45em; }
+
+/* The owner's share card (renderShareCard, src/ui/share.js). */
+.share { margin-top: var(--gap); }
+
+.share-terms {
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
+.share-status { font-weight: 600; }
+
+.share-fingerprint {
+  font-family: var(--font-body);
+  letter-spacing: 0.08em;
+}
+
+/* A key read out character by character must never sit in the script face —
+   the same reasoning that keeps figures in .value and .cal-day out of it. */
+#share-key, #share-uid {
+  display: block;
+  font-family: var(--font-body);
+  word-break: break-all;
+  background: var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-bottom: var(--gap);
+}
+
+#share-error { color: var(--warning); margin: 0; min-height: 1.45em; }
+
+.share li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 6px 0;
+}
+
+.share li button { width: auto; margin: 0; }

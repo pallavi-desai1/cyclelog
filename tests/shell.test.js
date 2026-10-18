@@ -296,7 +296,7 @@ describe('typography', () => {
   it('keeps figures in the readable face, not the script one', () => {
     // Dates and counts are read aloud at an appointment; a looping numeral is
     // where "28" becomes "23".
-    for (const selector of ['.value', '.cal-day']) {
+    for (const selector of ['.value', '.cal-day', '#share-key', '#share-uid']) {
       const rule = ruleBody(selector);
       expect(rule, selector).toMatch(/var\(--font-body\)/);
     }

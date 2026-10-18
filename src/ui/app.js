@@ -27,6 +27,14 @@ import { localToday } from '../today.js';
 import { addDays } from '../dates.js';
 import { applyDayEdit } from '../edit.js';
 import { renderEditor, patchFromValues, saveOutcome } from './editor.js';
+import { renderShareCard, PUSH_DEBOUNCE_MS } from './share.js';
+import {
+  shareState, withSharing, withScope, withIdentity, withViewer, withoutViewer,
+  withPushResult, withoutSharing, buildPayload,
+} from '../sync/share.js';
+import { generateSyncKey, fingerprint } from '../sync/key.js';
+import { signInAnonymously, refreshIdToken, putVault, grantViewer, revokeViewer } from '../sync/firestore.js';
+import { FIREBASE } from '../config.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -61,6 +69,10 @@ function returnToLock() {
   el('calendar').innerHTML = '';
   closePicker();
   el('day-detail').innerHTML = '';
+  el('share').innerHTML = '';
+  // A push timer armed before the lock must not fire against a document
+  // that no longer exists in memory — openDoc is cleared a few lines down.
+  if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
   say('cal-label', '');
   say('import-notice', '');
   // The decrypted document must not outlive the lock (spec §8), and the
@@ -137,6 +149,11 @@ let pendingSave = null;
 // runs.
 let unsavedWarning = null;
 
+// The debounced push's timer. Set by schedulePush, cleared by itself when it
+// fires and by returnToLock so a lock cannot leave a push armed against a
+// document that is about to leave memory.
+let pushTimer = null;
+
 async function paint(note = '') {
   // See pendingSave above. Ignoring a rejection here is deliberate: a save
   // that failed is unsavedWarning's problem to surface, not a reason to
@@ -154,7 +171,20 @@ async function paint(note = '') {
   selectedDate = null;
   showLastBackup();
   drawCalendar();
+  await drawShare();
   screen('app');
+}
+
+// Review Focus 3: she only trusts this card if it tells the truth about what
+// reached him, so every draw re-reads the stored push result, never a guess.
+async function drawShare() {
+  if (openDoc === null) return;
+  const state = shareState(openDoc);
+  el('share').innerHTML = renderShareCard({
+    state,
+    fingerprint: state.key === null ? '' : await fingerprint(state.key),
+    ownerUid: state.identity === null ? null : state.identity.uid,
+  });
 }
 
 // Where a period would have fallen in THIS month, not merely the next one
@@ -301,6 +331,9 @@ async function saveDay() {
     // Neither touches #day-detail, so an open draft for another day survives.
     el('summary').innerHTML = renderSummary(openSummary);
     drawCalendar();
+    // Not awaited: her save just landed in the vault, and sending a copy to
+    // him is a courtesy that must never hold that up.
+    schedulePush();
     if (outcome === 'adopt-only') return; // a different editor is open now; leave #day-detail alone
 
     editing = null;
@@ -336,6 +369,187 @@ async function saveDay() {
     if (pendingSave === writePromise) pendingSave = null;
     const saveButton = document.getElementById('edit-save');
     if (saveButton !== null) saveButton.disabled = false;
+  }
+}
+
+// An identity this device can use now: refreshed if it has one, created
+// anonymously if it does not. The refresh token lives in the encrypted
+// document, so it is as protected as her history.
+async function syncIdentity() {
+  const state = shareState(openDoc);
+  if (state.identity === null) {
+    const created = await signInAnonymously({ apiKey: FIREBASE.apiKey, fetchImpl: fetch });
+    await persistShareDoc(withIdentity(openDoc, { uid: created.uid, refreshToken: created.refreshToken }));
+    return { uid: created.uid, idToken: created.idToken };
+  }
+  const refreshed = await refreshIdToken({
+    apiKey: FIREBASE.apiKey, refreshToken: state.identity.refreshToken, fetchImpl: fetch,
+  });
+  return { uid: refreshed.uid, idToken: refreshed.idToken };
+}
+
+// Shared by every path that only mutates the sharing section: adopt the new
+// document into memory, then write it to the encrypted vault. What goes to
+// Google is a separate, projected payload (buildPayload) — this is what
+// stays on her device.
+async function persistShareDoc(doc) {
+  openDoc = doc;
+  await vault.save(serializeDocument(openDoc));
+}
+
+// Review Focus 3: every outcome is recorded, so the card tells her whether he
+// actually has this.
+async function pushShare() {
+  if (openDoc === null) return;
+  const state = shareState(openDoc);
+  if (state.key === null) return;
+  try {
+    const { uid, idToken } = await syncIdentity();
+    const payload = await buildPayload(openDoc, {
+      key: state.key, scope: state.scope, updatedAt: localToday(),
+    });
+    await putVault({
+      projectId: FIREBASE.projectId, idToken, ownerUid: uid, payload, fetchImpl: fetch,
+    });
+    await persistShareDoc(withPushResult(openDoc, { at: localToday(), status: 'ok' }));
+  } catch (error) {
+    const status = error && error.kind ? error.kind : 'server';
+    await persistShareDoc(withPushResult(openDoc, { at: localToday(), status }));
+  }
+  await drawShare();
+}
+
+// Coalesced: she may save several days in a row, and he needs the last
+// state, not each intermediate one.
+function schedulePush() {
+  if (openDoc === null) return;
+  if (shareState(openDoc).key === null) return;
+  if (pushTimer !== null) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => { pushTimer = null; pushShare(); }, PUSH_DEBOUNCE_MS);
+}
+
+// Every share-card handler writes its own failure here, never silently —
+// a share action that appears to do nothing is the one that erodes trust.
+function shareErrorMessage(error) {
+  const kind = error && error.kind;
+  if (kind === 'offline') return 'No connection — try again once you are back online.';
+  if (kind === 'denied') return 'That was refused. Check his sync id and that he is still granted.';
+  if (kind === 'unauthenticated') return 'This device needs to pair again. Try again in a moment.';
+  return 'Something went wrong. Please try again.';
+}
+
+async function startSharing() {
+  if (openDoc === null) return;
+  const scopeField = document.getElementById('share-scope');
+  const scope = scopeField === null ? 'dates' : scopeField.value;
+  try {
+    await persistShareDoc(withSharing(openDoc, { key: generateSyncKey(), scope }));
+    // Signed in now, not only on the eventual push, so her sync id is on
+    // screen the moment she starts sharing — he needs it to pair.
+    await syncIdentity();
+    await drawShare();
+    schedulePush();
+  } catch (error) {
+    say('share-error', shareErrorMessage(error));
+  }
+}
+
+async function changeShareScope() {
+  if (openDoc === null) return;
+  try {
+    await persistShareDoc(withScope(openDoc, el('share-scope').value));
+    await drawShare();
+    // §7.6: the scope change re-encrypts the whole payload, so he needs it
+    // pushed again, not just the next ordinary save.
+    schedulePush();
+  } catch (error) {
+    say('share-error', shareErrorMessage(error));
+  }
+}
+
+async function copyShareKey() {
+  if (openDoc === null) return;
+  const state = shareState(openDoc);
+  if (state.key === null) return;
+  try {
+    await navigator.clipboard.writeText(state.key);
+  } catch {
+    say('share-error', 'Could not copy the key. Select and copy it manually.');
+  }
+}
+
+async function addShareViewer() {
+  if (openDoc === null) return;
+  const viewerUid = el('share-viewer-uid').value.trim();
+  const label = el('share-viewer-label').value.trim();
+  if (viewerUid === '') {
+    say('share-error', 'Enter his sync id first.');
+    return;
+  }
+  try {
+    const { uid: ownerUid, idToken } = await syncIdentity();
+    const grantedAt = localToday();
+    await grantViewer({
+      projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid, label, grantedAt, fetchImpl: fetch,
+    });
+    await persistShareDoc(withViewer(openDoc, { uid: viewerUid, label, grantedAt }));
+    clear('share-viewer-uid');
+    clear('share-viewer-label');
+    await drawShare();
+  } catch (error) {
+    say('share-error', shareErrorMessage(error));
+  }
+}
+
+async function removeShareViewer(viewerUid) {
+  if (openDoc === null) return;
+  try {
+    const { uid: ownerUid, idToken } = await syncIdentity();
+    await revokeViewer({ projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid, fetchImpl: fetch });
+    await persistShareDoc(withoutViewer(openDoc, viewerUid));
+    await drawShare();
+  } catch (error) {
+    say('share-error', shareErrorMessage(error));
+  }
+}
+
+async function rekeyShare() {
+  if (openDoc === null) return;
+  try {
+    const scope = shareState(openDoc).scope;
+    await persistShareDoc(withSharing(openDoc, { key: generateSyncKey(), scope }));
+    await drawShare();
+    schedulePush();
+  } catch (error) {
+    say('share-error', shareErrorMessage(error));
+  }
+}
+
+// §7.5: the honest limit, named here rather than discovered later — stopping
+// sharing stops the future, not whatever his app has already cached.
+async function stopSharing() {
+  if (openDoc === null) return;
+  const ok = window.confirm(
+    'This stops sending new entries. It does not reach what his app has '
+    + 'already cached — he keeps the key for that, and it stays on his phone. '
+    + 'Stop sharing?',
+  );
+  if (!ok) return;
+  try {
+    const state = shareState(openDoc);
+    if (state.identity !== null) {
+      const { uid: ownerUid, idToken } = await syncIdentity();
+      for (const viewer of state.viewers) {
+        await revokeViewer({
+          projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid: viewer.uid, fetchImpl: fetch,
+        });
+      }
+    }
+    if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
+    await persistShareDoc(withoutSharing(openDoc));
+    await drawShare();
+  } catch (error) {
+    say('share-error', shareErrorMessage(error));
   }
 }
 
@@ -711,6 +925,19 @@ el('day-detail').addEventListener('input', () => {
 el('cal-label').addEventListener('click', () => { togglePicker(); });
 el('cal-picker').addEventListener('change', event => {
   if (event.target.id === 'cal-month' || event.target.id === 'cal-year') jumpToPickedMonth();
+});
+// One delegated listener for the share card, rebuilt on every draw.
+el('share').addEventListener('click', event => {
+  const { id } = event.target;
+  if (id === 'share-start') startSharing();
+  else if (id === 'share-copy') copyShareKey();
+  else if (id === 'share-add') addShareViewer();
+  else if (id === 'share-rekey') rekeyShare();
+  else if (id === 'share-stop') stopSharing();
+  else if (event.target.dataset.revoke) removeShareViewer(event.target.dataset.revoke);
+});
+el('share').addEventListener('change', event => {
+  if (event.target.id === 'share-scope') changeShareScope();
 });
 el('export-backup').addEventListener('click', () => { exportBackup(); });
 el('export-data').addEventListener('click', () => { exportPlaintext('data'); });
