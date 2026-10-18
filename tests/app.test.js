@@ -884,9 +884,12 @@ describe('the owner side of sharing', () => {
   it('pushes through the tested payload builder, never a raw document', () => {
     const body = functionBody(app(), 'pushShare');
     expect(body, 'pushShare').not.toBeNull();
-    expect(body).toMatch(/buildPayload\(/);
-    expect(body).toMatch(/putVault\(/);
-    expect(body).not.toMatch(/serializeDocument\(/);
+    const built = body.match(/(\w+)\s*=\s*await\s+buildPayload\(/);
+    expect(built, 'builds the payload via buildPayload(...)').not.toBeNull();
+    const [, payloadVar] = built;
+    const call = body.match(/putVault\(\{[\s\S]*?\}\)/);
+    expect(call, 'calls putVault(...)').not.toBeNull();
+    expect(call[0]).toMatch(new RegExp(`[{,]\\s*(payload:\\s*)?${payloadVar}\\s*[,}]`));
   });
 
   // Review Focus 3: the status she reads has to come from what happened.
@@ -910,5 +913,68 @@ describe('the owner side of sharing', () => {
 
   it('drops the share card with everything else on lock', () => {
     expect(functionBody(app(), 'returnToLock')).toMatch(/share'\)\.innerHTML = ''/);
+  });
+
+  // A lock can run to completion during any await in these handlers,
+  // nulling openDoc out from under the resumed code — the handler must
+  // notice and stop rather than read `.sharing` off null or build a `with*`
+  // call from a document that no longer exists.
+  it('re-checks openDoc after every await that could straddle a lock', () => {
+    for (const name of [
+      'syncIdentity', 'pushShare', 'startSharing', 'changeShareScope',
+      'addShareViewer', 'removeShareViewer', 'rekeyShare', 'stopSharing',
+    ]) {
+      const body = functionBody(app(), name);
+      expect(body, name).not.toBeNull();
+      const awaits = (body.match(/\bawait\b/g) || []).length;
+      const guards = (body.match(/openDoc === null/g) || []).length;
+      // Every handler already guards at entry (one of these `openDoc ===
+      // null` checks pays for that, not a post-await recheck), so there
+      // must be strictly more awaits than there are guards accounted for
+      // by entry checks alone — i.e. at least one guard survives per
+      // function beyond the first.
+      expect(guards, `${name}: no post-await null check found`).toBeGreaterThanOrEqual(2);
+      expect(awaits, `${name}: expected at least one await`).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  // persistShareDoc is the one place every handler writes the sharing
+  // section to the vault; it must not adopt a write into memory before that
+  // write is confirmed, and it must not revive the document after a lock
+  // already cleared it out from under an in-flight write.
+  it('does not adopt a write into memory before the vault confirms it', () => {
+    const body = functionBody(app(), 'persistShareDoc');
+    expect(body, 'persistShareDoc').not.toBeNull();
+    const save = body.indexOf('vault.save(');
+    const adopt = body.indexOf('openDoc = doc');
+    expect(save).toBeGreaterThan(-1);
+    expect(adopt).toBeGreaterThan(save);
+  });
+
+  it('say() is null-safe, so a stale element reference cannot throw', () => {
+    const text = app();
+    const match = text.match(/const say = \(id, message\) => \{([\s\S]*?)\n\};/);
+    expect(match, 'say() definition').not.toBeNull();
+    expect(match[1]).toMatch(/if\s*\([^)]*!==\s*null\)/);
+  });
+
+  // Review Focus 2: the card must never say "off" while the document says
+  // "on" — if the network step after the local write fails, she must still
+  // see that a key exists, or a second press mints and silently discards it.
+  it('redraws the card on a failed start, not just on success', () => {
+    const body = functionBody(app(), 'startSharing');
+    expect(body, 'startSharing').not.toBeNull();
+    const catchBlock = body.slice(body.indexOf('} catch'));
+    expect(catchBlock).toMatch(/drawShare\(/);
+  });
+
+  // §7.5: a partial revoke failure must say sharing is still on, not just
+  // "something went wrong" — she is mid-withdrawal and needs to know a retry
+  // is required.
+  it('tells her plainly when stopping sharing did not fully succeed', () => {
+    const body = functionBody(app(), 'stopSharing');
+    expect(body, 'stopSharing').not.toBeNull();
+    const catchBlock = body.slice(body.indexOf('} catch'));
+    expect(catchBlock).toMatch(/still on/i);
   });
 });

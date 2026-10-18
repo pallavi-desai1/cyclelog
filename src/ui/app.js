@@ -50,7 +50,10 @@ const vault = createVault({ backend });
 const el = id => document.getElementById(id);
 const show = id => { el(id).hidden = false; };
 const hide = id => { el(id).hidden = true; };
-const say = (id, message) => { el(id).textContent = message; };
+const say = (id, message) => {
+  const field = el(id);
+  if (field !== null) field.textContent = message;
+};
 
 function screen(name) {
   for (const id of ['setup', 'lock', 'app']) {
@@ -375,47 +378,73 @@ async function saveDay() {
 // An identity this device can use now: refreshed if it has one, created
 // anonymously if it does not. The refresh token lives in the encrypted
 // document, so it is as protected as her history.
+//
+// Returns null if the vault locked while the network call was in flight —
+// openDoc going null is how a caller resumed mid-await learns the session
+// it started with no longer exists, so it must stop rather than act on a
+// document that has already left memory.
 async function syncIdentity() {
   const state = shareState(openDoc);
   if (state.identity === null) {
     const created = await signInAnonymously({ apiKey: FIREBASE.apiKey, fetchImpl: fetch });
+    if (openDoc === null) return null;
     await persistShareDoc(withIdentity(openDoc, { uid: created.uid, refreshToken: created.refreshToken }));
+    if (openDoc === null) return null;
     return { uid: created.uid, idToken: created.idToken };
   }
   const refreshed = await refreshIdToken({
     apiKey: FIREBASE.apiKey, refreshToken: state.identity.refreshToken, fetchImpl: fetch,
   });
+  if (openDoc === null) return null;
   return { uid: refreshed.uid, idToken: refreshed.idToken };
 }
 
-// Shared by every path that only mutates the sharing section: adopt the new
-// document into memory, then write it to the encrypted vault. What goes to
-// Google is a separate, projected payload (buildPayload) — this is what
-// stays on her device.
+// Shared by every path that only mutates the sharing section: write to the
+// encrypted vault first, and only adopt the result into memory once that
+// write has actually landed — the same guarantee saveDay gives the day
+// editor, and for the same reason: a failed write must leave her looking at
+// what is actually stored, not at a document memory adopted optimistically.
+//
+// The epoch check is what stops a second failure mode: a lock arriving
+// while this write is still in flight already sets openDoc to null, and
+// this function resuming afterwards must not revive it — the next unlock
+// reads the vault fresh.
 async function persistShareDoc(doc) {
+  const epoch = sessionEpoch;
+  await vault.save(serializeDocument(doc));
+  if (sessionEpoch !== epoch) return;
   openDoc = doc;
-  await vault.save(serializeDocument(openDoc));
 }
 
-// Review Focus 3: every outcome is recorded, so the card tells her whether he
-// actually has this.
+// Review Focus 3: every outcome is recorded, so the card tells her whether
+// he actually has this. Every `if (openDoc === null) return;` below guards
+// the same race: a lock (idle timer, visibility change, the Lock button)
+// can run to completion during any of this function's awaits, nulling
+// openDoc out from under it — the next line must not read `.sharing` off
+// null, or build a `with*` call from a document that no longer exists.
 async function pushShare() {
   if (openDoc === null) return;
   const state = shareState(openDoc);
   if (state.key === null) return;
   try {
-    const { uid, idToken } = await syncIdentity();
+    const identity = await syncIdentity();
+    if (openDoc === null || identity === null) return;
+    const { uid, idToken } = identity;
     const payload = await buildPayload(openDoc, {
       key: state.key, scope: state.scope, updatedAt: localToday(),
     });
+    if (openDoc === null) return;
     await putVault({
       projectId: FIREBASE.projectId, idToken, ownerUid: uid, payload, fetchImpl: fetch,
     });
+    if (openDoc === null) return;
     await persistShareDoc(withPushResult(openDoc, { at: localToday(), status: 'ok' }));
   } catch (error) {
+    if (openDoc === null) return;
     const status = error && error.kind ? error.kind : 'server';
     await persistShareDoc(withPushResult(openDoc, { at: localToday(), status }));
   }
+  if (openDoc === null) return;
   await drawShare();
 }
 
@@ -430,10 +459,17 @@ function schedulePush() {
 
 // Every share-card handler writes its own failure here, never silently —
 // a share action that appears to do nothing is the one that erodes trust.
-function shareErrorMessage(error) {
+// `context` lets the "denied" case name what was actually refused, rather
+// than always talking about a viewer's sync id even when the action was a
+// re-key or a stop.
+function shareErrorMessage(error, context = 'default') {
   const kind = error && error.kind;
   if (kind === 'offline') return 'No connection — try again once you are back online.';
-  if (kind === 'denied') return 'That was refused. Check his sync id and that he is still granted.';
+  if (kind === 'denied') {
+    if (context === 'add') return 'That was refused. Check his sync id and that he is still granted.';
+    if (context === 'revoke') return 'That removal was refused by the server. Try again.';
+    return 'That was refused by the server.';
+  }
   if (kind === 'unauthenticated') return 'This device needs to pair again. Try again in a moment.';
   return 'Something went wrong. Please try again.';
 }
@@ -444,13 +480,22 @@ async function startSharing() {
   const scope = scopeField === null ? 'dates' : scopeField.value;
   try {
     await persistShareDoc(withSharing(openDoc, { key: generateSyncKey(), scope }));
-    // Signed in now, not only on the eventual push, so her sync id is on
-    // screen the moment she starts sharing — he needs it to pair.
-    await syncIdentity();
+    // Redrawn right here, before the network step below: the document
+    // already says sharing is on, so the card must too, even if the sign-in
+    // that follows fails or the vault locks mid-flight. Without this a
+    // failed sign-in left the card still showing "Start sharing" over a
+    // document that already held a fresh key — a second press would mint
+    // and silently discard another one, one he may already have typed in.
+    await drawShare();
+    if (openDoc === null) return;
+    const identity = await syncIdentity();
+    if (openDoc === null || identity === null) return;
     await drawShare();
     schedulePush();
   } catch (error) {
-    say('share-error', shareErrorMessage(error));
+    if (openDoc === null) return;
+    await drawShare();
+    say('share-error', shareErrorMessage(error, 'start'));
   }
 }
 
@@ -458,12 +503,15 @@ async function changeShareScope() {
   if (openDoc === null) return;
   try {
     await persistShareDoc(withScope(openDoc, el('share-scope').value));
+    if (openDoc === null) return;
     await drawShare();
     // §7.6: the scope change re-encrypts the whole payload, so he needs it
     // pushed again, not just the next ordinary save.
     schedulePush();
   } catch (error) {
-    say('share-error', shareErrorMessage(error));
+    if (openDoc === null) return;
+    await drawShare();
+    say('share-error', shareErrorMessage(error, 'scope'));
   }
 }
 
@@ -487,29 +535,41 @@ async function addShareViewer() {
     return;
   }
   try {
-    const { uid: ownerUid, idToken } = await syncIdentity();
+    const identity = await syncIdentity();
+    if (openDoc === null || identity === null) return;
+    const { uid: ownerUid, idToken } = identity;
     const grantedAt = localToday();
     await grantViewer({
       projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid, label, grantedAt, fetchImpl: fetch,
     });
+    if (openDoc === null) return;
     await persistShareDoc(withViewer(openDoc, { uid: viewerUid, label, grantedAt }));
+    if (openDoc === null) return;
     clear('share-viewer-uid');
     clear('share-viewer-label');
     await drawShare();
   } catch (error) {
-    say('share-error', shareErrorMessage(error));
+    if (openDoc === null) return;
+    await drawShare();
+    say('share-error', shareErrorMessage(error, 'add'));
   }
 }
 
 async function removeShareViewer(viewerUid) {
   if (openDoc === null) return;
   try {
-    const { uid: ownerUid, idToken } = await syncIdentity();
+    const identity = await syncIdentity();
+    if (openDoc === null || identity === null) return;
+    const { uid: ownerUid, idToken } = identity;
     await revokeViewer({ projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid, fetchImpl: fetch });
+    if (openDoc === null) return;
     await persistShareDoc(withoutViewer(openDoc, viewerUid));
+    if (openDoc === null) return;
     await drawShare();
   } catch (error) {
-    say('share-error', shareErrorMessage(error));
+    if (openDoc === null) return;
+    await drawShare();
+    say('share-error', shareErrorMessage(error, 'revoke'));
   }
 }
 
@@ -518,10 +578,13 @@ async function rekeyShare() {
   try {
     const scope = shareState(openDoc).scope;
     await persistShareDoc(withSharing(openDoc, { key: generateSyncKey(), scope }));
+    if (openDoc === null) return;
     await drawShare();
     schedulePush();
   } catch (error) {
-    say('share-error', shareErrorMessage(error));
+    if (openDoc === null) return;
+    await drawShare();
+    say('share-error', shareErrorMessage(error, 'rekey'));
   }
 }
 
@@ -538,18 +601,27 @@ async function stopSharing() {
   try {
     const state = shareState(openDoc);
     if (state.identity !== null) {
-      const { uid: ownerUid, idToken } = await syncIdentity();
+      const identity = await syncIdentity();
+      if (openDoc === null || identity === null) return;
+      const { uid: ownerUid, idToken } = identity;
       for (const viewer of state.viewers) {
         await revokeViewer({
           projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid: viewer.uid, fetchImpl: fetch,
         });
+        if (openDoc === null) return;
       }
     }
+    if (openDoc === null) return;
     if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
     await persistShareDoc(withoutSharing(openDoc));
     await drawShare();
   } catch (error) {
-    say('share-error', shareErrorMessage(error));
+    if (openDoc === null) return;
+    await drawShare();
+    // A partial failure here must say she is still exposed, not just that
+    // "something went wrong": the key is deliberately kept (see the loop
+    // above), and she needs to know a retry is required, not just reread.
+    say('share-error', 'Sharing is still on — not everyone could be removed. Try Stop sharing again.');
   }
 }
 
