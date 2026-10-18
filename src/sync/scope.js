@@ -21,17 +21,31 @@ const DAY_FIELDS = {
   everything: ['flow', 'cramps', 'spotting', 'pms', 'mood', 'discharge', 'tests', 'pain', 'medicine', 'notes', 'source', 'precision'],
 };
 
+// A key the scope's field list does not name must simply not appear in the
+// output — DAY_FIELDS (and its siblings for spans/gaps/episodes) is the only
+// source of truth for what exists, never topped up afterwards. Any value
+// that survives the whitelist and is mutable (array or plain object) is
+// copied here, once, so a future list field can't repeat the mistake of
+// being aliased instead of copied.
+const copyValue = (value) => {
+  if (Array.isArray(value)) return [...value];
+  if (value !== null && typeof value === 'object') return { ...value };
+  return value;
+};
+
 const pick = (source, fields) => {
   const out = {};
   for (const field of fields) {
-    if (source[field] !== undefined) out[field] = source[field];
+    if (source[field] !== undefined) out[field] = copyValue(source[field]);
   }
   return out;
 };
 
 // A day worth sending: one whose projected fields hold something. Otherwise a
 // note-only day would travel as an empty husk under the symptoms scope,
-// telling him she logged something on a date without saying what.
+// telling him she logged something on a date without saying what. Reads with
+// `?? []` / `=== true` so it works whether or not the scope's whitelist even
+// named the key.
 function hasContent(day) {
   return Boolean(day.flow) || Boolean(day.cramps) || Boolean(day.spotting)
     || Boolean(day.discharge) || day.pms === true
@@ -51,13 +65,6 @@ export function projectDocument(doc, scope) {
     const fields = DAY_FIELDS[scope];
     for (const [date, day] of Object.entries(doc.days ?? {})) {
       const projected = pick(day, fields);
-      // Defaults for the fields the model promises but this day may not hold,
-      // so his app reads the same shape hers does.
-      projected.mood = [...(projected.mood ?? [])];
-      projected.pain = [...(projected.pain ?? [])];
-      projected.tests = { ovulation: null, pregnancy: null, ...(projected.tests ?? {}) };
-      projected.pms = projected.pms === true;
-      projected.notes = projected.notes ?? '';
       if (hasContent(projected)) days[date] = projected;
     }
   }

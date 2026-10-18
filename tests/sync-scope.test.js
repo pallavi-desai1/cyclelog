@@ -111,13 +111,46 @@ describe('the symptoms scope', () => {
     expect(day().medicine).toEqual(['ibuprofen']);
   });
 
-  it('carries no note', () => {
-    expect(day().notes).toBe('');
+  it('carries no note — not even as an empty string, since the whitelist does not name it', () => {
+    expect('notes' in day()).toBe(false);
     expect(JSON.stringify(projectDocument(doc(), 'symptoms'))).not.toContain('a private thought');
   });
 
   it('keeps the precision, so an approximate date still reads as one', () => {
     expect(day().precision).toBe('exact');
+  });
+
+  // The projected arrays must be her own, not the same objects as the source
+  // day's — otherwise anything downstream that mutates the projection
+  // mutates her real history.
+  it('copies the mutable arrays rather than aliasing the source', () => {
+    const source = doc();
+    const projected = projectDocument(source, 'symptoms').days['2015-01-29'];
+    projected.medicine.push('mutated');
+    projected.mood.push('mutated');
+    projected.pain.push('mutated');
+    expect(source.days['2015-01-29'].medicine).toEqual(['ibuprofen']);
+    expect(source.days['2015-01-29'].mood).toEqual(['sad']);
+    expect(source.days['2015-01-29'].pain).toEqual(['headache']);
+  });
+
+  it('copies the tests object rather than aliasing the source', () => {
+    const source = doc();
+    const projected = projectDocument(source, 'symptoms').days['2015-01-29'];
+    projected.tests.ovulation = 'mutated';
+    expect(source.days['2015-01-29'].tests.ovulation).toBe('negative');
+  });
+
+  it('still sends a day whose only content is what she took for it', () => {
+    const medOnly = doc();
+    medOnly.days['2015-02-14'] = {
+      flow: null, cramps: null, spotting: null, pms: false, mood: [], discharge: null,
+      tests: { ovulation: null, pregnancy: null }, pain: [], medicine: ['ibuprofen'],
+      notes: '', source: 'manual', precision: 'exact',
+    };
+    const projected = projectDocument(medOnly, 'symptoms').days['2015-02-14'];
+    expect(projected).toBeDefined();
+    expect(projected.medicine).toEqual(['ibuprofen']);
   });
 });
 
