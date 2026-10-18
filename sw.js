@@ -25,6 +25,7 @@ const PRECACHE = [
   'src/weighted.js',
   'src/stats.js',
   'src/summary.js',
+  'src/sync/key.js',
   'src/calendar.js',
   'src/day.js',
   'src/importers/clue.js',
