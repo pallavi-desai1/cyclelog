@@ -47,6 +47,45 @@ describe('purity', () => {
   });
 });
 
+// A token-refresh flow that mutates its identity object in place, or a push
+// driver that reuses one {at, status} object across attempts, must not be
+// able to rewrite a value already stored in a document handed to other
+// code. Every with* helper, and shareState itself, has to copy nested
+// values rather than merely the top level.
+describe('aliasing: nothing stored or read keeps a live reference', () => {
+  it('storing an identity and then mutating the object passed in leaves the document alone', () => {
+    const identity = { uid: 'u', refreshToken: 'r1' };
+    const after = withIdentity(doc(), identity);
+    identity.refreshToken = 'r2';
+    expect(shareState(after).identity).toEqual({ uid: 'u', refreshToken: 'r1' });
+  });
+
+  it('storing a push result and then mutating the object passed in leaves the document alone', () => {
+    const result = { at: '2015-03-26', status: 'ok' };
+    const after = withPushResult(doc(), result);
+    result.status = 'offline';
+    expect(shareState(after).lastPush).toEqual({ at: '2015-03-26', status: 'ok' });
+  });
+
+  it('storing a viewer and then mutating the object passed in leaves the document alone', () => {
+    const viewer = { uid: 'u', label: 'partner', grantedAt: '2015-03-26' };
+    const after = withViewer(withSharing(doc(), { key: 'KEY', scope: 'dates' }), viewer);
+    viewer.label = 'tampered';
+    expect(shareState(after).viewers).toEqual([
+      { uid: 'u', label: 'partner', grantedAt: '2015-03-26' },
+    ]);
+  });
+
+  it('mutating a viewer read back out of the document does not reach the document', () => {
+    const shared = withViewer(
+      withSharing(doc(), { key: 'KEY', scope: 'dates' }),
+      { uid: 'u', label: 'partner', grantedAt: '2015-03-26' },
+    );
+    shareState(shared).viewers[0].label = 'tampered';
+    expect(shareState(shared).viewers[0].label).toBe('partner');
+  });
+});
+
 describe('viewers', () => {
   const shared = () => withSharing(doc(), { key: 'KEY', scope: 'dates' });
 

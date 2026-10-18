@@ -3,6 +3,8 @@ import {
   EXPORT_VERSION, FILENAMES, csvCell, documentJson, daysCsv, cyclesCsv, backupBundle,
 } from '../src/export.js';
 import { buildCycles } from '../src/cycles.js';
+import { createVault } from '../src/unlock.js';
+import { memoryBackend, readMeta, VAULT_KEY } from '../src/store.js';
 
 const day = (overrides = {}) => ({
   flow: null, cramps: null, spotting: null, pms: false, mood: [], discharge: null,
@@ -268,10 +270,26 @@ describe('sharing state never leaves in an export', () => {
   };
 
   // The encrypted backup SHOULD carry it — it is her own document, sealed
-  // under her own passphrase, and a restore has to bring sharing back.
-  it('keeps it inside the encrypted backup, where only she can read it', () => {
-    const text = backupBundle({ meta: { salt: [1], iterations: 310000, wrapped: {} }, vault: { iv: [1], ciphertext: [2] }, exportedAt: '2015-03-26' });
+  // under her own passphrase, and a restore has to bring sharing back. Built
+  // from a real sealed vault (not a hand-made fake blob that never held the
+  // key), so the first assertion can actually fail if sealing ever breaks.
+  it('keeps it inside the encrypted backup, where only she can read it', async () => {
+    const backend = memoryBackend();
+    const vault = createVault({ backend });
+    const passphrase = 'correct horse battery staple';
+    await vault.setup(passphrase, JSON.stringify(shared));
+
+    const meta = await readMeta(backend);
+    const sealedVault = await backend.get(VAULT_KEY);
+    const text = backupBundle({ meta, vault: sealedVault, exportedAt: '2015-03-26' });
     expect(text).not.toContain('SECRETSYNCKEY');   // because the vault is sealed
+
+    // Prove it is sealing, not absence: the same passphrase that produced
+    // this backup can open it and find the key still inside.
+    vault.lock();
+    const unlocked = await vault.unlock(passphrase);
+    expect(unlocked.ok).toBe(true);
+    expect(vault.read()).toContain('SECRETSYNCKEY');
   });
 
   // The CSVs are a different matter: they are plaintext and must not carry it.
