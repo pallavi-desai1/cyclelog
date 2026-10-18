@@ -28,6 +28,7 @@ const PRECACHE = [
   'src/sync/key.js',
   'src/sync/scope.js',
   'src/sync/firestore.js',
+  'src/sync/share.js',
   'src/calendar.js',
   'src/day.js',
   'src/importers/clue.js',

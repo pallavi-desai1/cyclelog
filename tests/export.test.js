@@ -255,3 +255,38 @@ describe('backupBundle', () => {
     expect(() => backupBundle({ meta, vault: null, exportedAt: '2015-03-26' })).toThrow();
   });
 });
+
+describe('sharing state never leaves in an export', () => {
+  const shared = {
+    ...doc,
+    sharing: {
+      key: 'SECRETSYNCKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      scope: 'dates',
+      identity: { uid: 'anon-uid', refreshToken: 'refresh-token' },
+      viewers: [{ uid: 'viewer-uid', label: 'partner', grantedAt: '2015-03-26' }],
+    },
+  };
+
+  // The encrypted backup SHOULD carry it — it is her own document, sealed
+  // under her own passphrase, and a restore has to bring sharing back.
+  it('keeps it inside the encrypted backup, where only she can read it', () => {
+    const text = backupBundle({ meta: { salt: [1], iterations: 310000, wrapped: {} }, vault: { iv: [1], ciphertext: [2] }, exportedAt: '2015-03-26' });
+    expect(text).not.toContain('SECRETSYNCKEY');   // because the vault is sealed
+  });
+
+  // The CSVs are a different matter: they are plaintext and must not carry it.
+  it('writes no sharing state into either CSV', () => {
+    for (const csv of [daysCsv(shared), cyclesCsv([])]) {
+      expect(csv).not.toContain('SECRETSYNCKEY');
+      expect(csv).not.toContain('refresh-token');
+      expect(csv).not.toContain('viewer-uid');
+    }
+  });
+
+  // The plaintext JSON is her whole document by definition, so it does carry
+  // the key — and that is exactly why the download warns her first. This test
+  // pins the warning's reason rather than pretending the file is safe.
+  it('carries it in the plaintext JSON, which is why that download warns', () => {
+    expect(documentJson(shared)).toContain('SECRETSYNCKEY');
+  });
+});
