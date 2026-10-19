@@ -1031,4 +1031,35 @@ describe('the viewer mode', () => {
   it('drops her data from his screen when his vault locks', () => {
     expect(functionBody(app(), 'returnToLock')).toMatch(/viewer'\)\.innerHTML = ''/);
   });
+
+  // Fix (post-review): the key is sealed into his vault by vault.setup(), so
+  // nothing is left for a plaintext <input> to keep holding — on success or
+  // on a failed pairing, which must not leave it sitting there just as long.
+  it('clears the sync id and key fields once pairing succeeds, so the key does not sit in plaintext', () => {
+    const body = functionBody(app(), 'createViewer');
+    const setupIndex = body.indexOf('vault.setup(');
+    const clearUidIndex = body.indexOf("clear('viewer-owner-uid');");
+    const clearKeyIndex = body.indexOf("clear('viewer-key');");
+    expect(setupIndex, 'vault.setup(').toBeGreaterThan(-1);
+    expect(clearUidIndex, "clear('viewer-owner-uid');").toBeGreaterThan(setupIndex);
+    expect(clearKeyIndex, "clear('viewer-key');").toBeGreaterThan(setupIndex);
+  });
+
+  it('clears the same fields on a failed pairing, not just on success', () => {
+    const body = functionBody(app(), 'createViewer');
+    const catchBody = body.slice(body.search(/\bcatch\b/));
+    expect(catchBody).toMatch(/clear\('viewer-owner-uid'\);/);
+    expect(catchBody).toMatch(/clear\('viewer-key'\);/);
+  });
+
+  // Fix (post-review): every other async button here guards against a
+  // second tap while the first is still in flight; viewer-refresh was the
+  // one exception, letting two fast taps on a flaky connection interleave.
+  it('guards viewer-refresh against a second tap while a fetch is already in flight', () => {
+    const body = functionBody(app(), 'paintViewer');
+    expect(body, 'paintViewer').not.toBeNull();
+    expect(body).toMatch(/if \(el\('viewer-refresh'\)\.disabled\) return;/);
+    expect(body).toMatch(/el\('viewer-refresh'\)\.disabled = true;/);
+    expect(body).toMatch(/finally\s*\{[\s\S]*el\('viewer-refresh'\)\.disabled = false;[\s\S]*\}/);
+  });
 });

@@ -683,6 +683,12 @@ async function createViewer() {
     hasVault = true;
     clear('setup-passphrase');
     clear('setup-confirm');
+    // The key is sealed into his vault now; a plaintext <input> holding it
+    // for the rest of the session would be the one secret requirement 4
+    // says should live only there, readable in devtools long after this
+    // screen is gone.
+    clear('viewer-owner-uid');
+    clear('viewer-key');
     // His uid, for him to read back to her so she can grant him access —
     // this is the only direction his identity travels on its own.
     say('setup-progress', `Your sync id (read it to her so she can grant access): ${identity.uid}`);
@@ -690,6 +696,10 @@ async function createViewer() {
   } catch {
     say('setup-progress', '');
     say('setup-error', 'Something went wrong. Please try again.');
+    // A failed pairing must not leave the key sitting in plaintext for as
+    // long as a successful one would have cleared it.
+    clear('viewer-owner-uid');
+    clear('viewer-key');
   } finally {
     el('viewer-create').disabled = false;
   }
@@ -757,23 +767,32 @@ async function refreshViewer() {
 // persistent, individually-addressed node — only #viewer itself, and the
 // static controls outside it, survive from one paint to the next.
 async function paintViewer() {
-  viewerRecordData = parseViewerRecord(vault.read());
-  await refreshViewer();
-  if (viewerRecordData === null) return; // locked mid-refresh
-  if (viewerShared === null) {
-    el('viewer').innerHTML = renderViewerHeader({ scope: null, updatedAt: null, label: '' });
-  } else {
-    const { doc, scope, updatedAt } = viewerShared;
-    const summary = buildSummary(doc, localToday());
-    const grid = monthGrid(doc, {
-      month: monthOf(localToday()), todayISO: localToday(),
-      adaptedDate: summary.adapted.date, baselineDates: [],
-    });
-    el('viewer').innerHTML = renderViewerHeader({ scope, updatedAt, label: 'her' })
-      + renderSummary(summary)
-      + renderCalendar(grid);
+  // Two fast taps on a flaky connection would otherwise interleave, letting
+  // a slower response's clear-and-message land after a faster one's
+  // success — the same guard every other async button here already has.
+  if (el('viewer-refresh').disabled) return;
+  el('viewer-refresh').disabled = true;
+  try {
+    viewerRecordData = parseViewerRecord(vault.read());
+    await refreshViewer();
+    if (viewerRecordData === null) return; // locked mid-refresh
+    if (viewerShared === null) {
+      el('viewer').innerHTML = renderViewerHeader({ scope: null, updatedAt: null, label: '' });
+    } else {
+      const { doc, scope, updatedAt } = viewerShared;
+      const summary = buildSummary(doc, localToday());
+      const grid = monthGrid(doc, {
+        month: monthOf(localToday()), todayISO: localToday(),
+        adaptedDate: summary.adapted.date, baselineDates: [],
+      });
+      el('viewer').innerHTML = renderViewerHeader({ scope, updatedAt, label: 'her' })
+        + renderSummary(summary)
+        + renderCalendar(grid);
+    }
+    screen('viewer-screen');
+  } finally {
+    el('viewer-refresh').disabled = false;
   }
-  screen('viewer-screen');
 }
 
 // The picker is built from the document, so its range covers exactly the
