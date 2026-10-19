@@ -1,0 +1,28 @@
+rules_version = '2';
+
+// The authorization boundary. Everything in the app above this is
+// convenience; this is what actually decides who may fetch the bytes.
+//
+// Read-only for the partner is enforced HERE rather than by the absence of a
+// button in his build: he holds the sync key, so if the rules allowed writes
+// he could make them with any HTTP client.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /vaults/{ownerUid} {
+      // The owner always; a viewer only while her grant document exists.
+      allow read: if request.auth != null
+                  && (request.auth.uid == ownerUid
+                      || exists(/databases/$(database)/documents/vaults/$(ownerUid)/viewers/$(request.auth.uid)));
+
+      // Only ever the owner.
+      allow write: if request.auth != null && request.auth.uid == ownerUid;
+
+      // The grants themselves are hers alone — a viewer cannot read who else
+      // can see her data, nor grant himself anything.
+      match /viewers/{viewerUid} {
+        allow read, write: if request.auth != null && request.auth.uid == ownerUid;
+      }
+    }
+  }
+}

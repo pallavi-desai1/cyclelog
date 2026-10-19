@@ -79,6 +79,46 @@ Two things no backup can save you from:
 The app asks the browser for persistent storage so the vault is not treated as
 cache, but that is a request the browser may refuse.
 
+## Sharing
+
+An owner can let a second device read a chosen scope of her vault — dates and
+predictions, dates with flow and symptoms, or everything including notes — by
+generating a 256-bit sync key on her device, encrypting the chosen scope with
+it, and writing the ciphertext to Firestore. The key reaches the second device
+only by being read off the owner's screen in person; it is never uploaded,
+never put in the Firebase config, and never travels in any network request.
+
+**`firestore.rules` is the authorization boundary.** It is the file that must
+be deployed — `firebase deploy --only firestore:rules`, or pasted whole into
+the console — never hand-edited piecemeal in the console and left undeployed
+from the repo. A rule change that only exists in the console is a rule change
+nobody reviewed and nobody can diff. The rules let the owner read and write
+her own vault; a viewer may read only while his grant document exists under
+`/vaults/{ownerUid}/viewers/{viewerUid}`; nobody but the owner can write to
+either document; and nothing is granted to a caller without a valid anonymous
+auth token. A second device holding the sync key but lacking a grant can
+decrypt nothing, because the rules never let it fetch the ciphertext in the
+first place.
+
+**`src/config.js` holds a `projectId` and an `apiKey`.** These are not
+secrets — they identify the Firebase project and authorise nothing on their
+own. Anyone who reads them out of the published app learns which project to
+send requests to; whether those requests succeed is decided entirely by
+`firestore.rules`. Treating the rules as the actual boundary, rather than the
+config file, is what makes it safe to publish both from a public repo.
+
+**The honest limits.** The transport host (Google) can see two anonymous
+identifiers (one per device), and the size and timing of an encrypted
+document being written and read, plus the IP addresses making those
+requests. It cannot see any date, symptom, note, or prediction — the document
+is ciphertext and the key never reaches it. Revoking a grant stops future
+reads; it does not reach into the second device and delete what it already
+fetched and decrypted while the grant existed — whoever held the key for a
+cached copy still holds the key for it. And the app is served from GitHub
+Pages, never from Firebase Hosting: a host that served both the code and the
+ciphertext could ship a build that quietly uploaded the key alongside a
+save, and nobody would be able to tell from the outside.
+
 ## Running the app
 
 ```bash

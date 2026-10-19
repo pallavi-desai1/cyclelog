@@ -64,8 +64,12 @@ describe('content security policy', () => {
     }
   });
 
-  it('names no external host and no wildcard', () => {
-    expect(policy()).not.toMatch(/https?:\/\//);
+  it('names no external host outside connect-src, and no wildcard', () => {
+    // Sharing (tested below) widens connect-src to the three Google hosts
+    // the sync needs; every other directive must still name nothing but
+    // this origin.
+    const withoutConnectSrc = policy().replace(/connect-src[^;]*/, 'connect-src');
+    expect(withoutConnectSrc).not.toMatch(/https?:\/\//);
     expect(policy()).not.toContain('*');
   });
 
@@ -546,5 +550,28 @@ describe('the Today button styling', () => {
     const rule = ruleBody('#cal-today');
     expect(rule).toMatch(/width:\s*auto/);
     expect(rule).toMatch(/min-height/);
+  });
+});
+
+describe('the content security policy with sharing', () => {
+  const policy = () => html().match(/content="([^"]*default-src[^"]*)"/)[1];
+
+  it('reaches exactly the three Google hosts the sync needs', () => {
+    expect(policy()).toMatch(/connect-src [^;]*https:\/\/firestore\.googleapis\.com/);
+    expect(policy()).toMatch(/connect-src [^;]*https:\/\/identitytoolkit\.googleapis\.com/);
+    expect(policy()).toMatch(/connect-src [^;]*https:\/\/securetoken\.googleapis\.com/);
+  });
+
+  it('still allows scripts only from this origin', () => {
+    expect(policy()).toMatch(/script-src 'self'/);
+    expect(policy()).not.toMatch(/script-src[^;]*google/);
+  });
+
+  it('still denies everything unnamed', () => {
+    expect(policy()).toContain("default-src 'none'");
+  });
+
+  it('loads no Google script in the page', () => {
+    expect(html()).not.toMatch(/gstatic|googleapis\.com\/.*\.js|firebasejs/);
   });
 });
