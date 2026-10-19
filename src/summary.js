@@ -59,7 +59,11 @@ export function buildSummary(doc, todayISO) {
       last12Median: stats.last12.median,
     },
 
-    method: episode === null ? null : {
+    // A scope-narrowed projection (the `dates` share scope) carries an
+    // episode with no `method` name at all — `episode.method === undefined`
+    // — and that must produce no method object, not one with a missing
+    // name that a renderer would print as an empty label.
+    method: episode === null || episode.method === undefined ? null : {
       method: episode.method,
       startedOn: episode.startedOn,
       expectedEffect: episode.expectedEffect,

@@ -202,6 +202,18 @@ async function paint(note = '') {
   showLastBackup();
   drawCalendar();
   await drawShare();
+  // Critical 3: a push interrupted by a lock (returnToLock clears the timer;
+  // iOS can lock within the 5s debounce window) must retry rather than sit
+  // there forever — this is the only remaining chance, since nothing else
+  // retries it. 'ok' is the only status that means he actually has it.
+  // openDoc can go null during the await just above (a lock racing this
+  // same paint) — shareState(null) would throw, so this has to guard too.
+  if (openDoc !== null) {
+    const sharing = shareState(openDoc);
+    if (sharing.key !== null && sharing.lastPush !== null && sharing.lastPush.status !== 'ok') {
+      schedulePush().catch(() => {});
+    }
+  }
   screen('app');
 }
 
@@ -465,23 +477,35 @@ async function pushShare() {
       projectId: FIREBASE.projectId, idToken, ownerUid: uid, payload, fetchImpl: fetch,
     });
     if (openDoc === null) return;
-    await persistShareDoc(withPushResult(openDoc, { at: localToday(), status: 'ok' }));
+    // scope travels with the result so describePush can tell a push that
+    // landed under an older scope from one that matches what she has now
+    // chosen (Critical 3).
+    await persistShareDoc(withPushResult(openDoc, { at: localToday(), status: 'ok', scope: state.scope }));
   } catch (error) {
     if (openDoc === null) return;
     const status = error && error.kind ? error.kind : 'server';
-    await persistShareDoc(withPushResult(openDoc, { at: localToday(), status }));
+    await persistShareDoc(withPushResult(openDoc, { at: localToday(), status, scope: state.scope }));
   }
   if (openDoc === null) return;
   await drawShare();
 }
 
 // Coalesced: she may save several days in a row, and he needs the last
-// state, not each intermediate one.
-function schedulePush() {
+// state, not each intermediate one. Async now (Critical 3): the card has to
+// read "not yet sent" the instant a save schedules a push, not only once the
+// debounce fires minutes — or, if she locks first, forever — later.
+async function schedulePush() {
   if (openDoc === null) return;
-  if (shareState(openDoc).key === null) return;
+  const state = shareState(openDoc);
+  if (state.key === null) return;
   if (pushTimer !== null) clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => { pushTimer = null; pushShare(); }, PUSH_DEBOUNCE_MS);
+  await persistShareDoc(
+    withPushResult(openDoc, { at: localToday(), status: 'pending', scope: state.scope }),
+  );
+  if (openDoc === null) return;
+  await drawShare();
+  if (openDoc === null) return;
+  pushTimer = setTimeout(() => { pushTimer = null; pushShare().catch(() => {}); }, PUSH_DEBOUNCE_MS);
 }
 
 // Every share-card handler writes its own failure here, never silently —
@@ -566,8 +590,10 @@ async function addShareViewer() {
     if (openDoc === null || identity === null) return;
     const { uid: ownerUid, idToken } = identity;
     const grantedAt = localToday();
+    // Critical 2: his label never travels — it is uploaded nowhere, only
+    // kept locally by withViewer, just below.
     await grantViewer({
-      projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid, label, grantedAt, fetchImpl: fetch,
+      projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid, grantedAt, fetchImpl: fetch,
     });
     if (openDoc === null) return;
     await persistShareDoc(withViewer(openDoc, { uid: viewerUid, label, grantedAt }));
@@ -881,7 +907,12 @@ function exportPlaintext(kind) {
 
   try {
     if (kind === 'data') {
-      download(FILENAMES.data, documentJson(openDoc), 'application/json');
+      // Review Focus 1 again, at an export boundary it missed the first
+      // time: the plaintext data export must carry none of `sharing` — not
+      // the sync key, and not the refresh token that mints her owner id
+      // tokens, which is strictly worse than the key alone. A restore of
+      // this file then arrives with sharing off, which is the right default.
+      download(FILENAMES.data, documentJson(withoutSharing(openDoc)), 'application/json');
     } else if (kind === 'days') {
       download(FILENAMES.days, daysCsv(openDoc), 'text/csv');
     } else {

@@ -5,14 +5,24 @@
 export const SCOPES = ['dates', 'symptoms', 'everything'];
 
 export const SCOPE_LABELS = {
-  dates: 'Dates and predictions — when your periods were and when the next one is expected.',
+  dates: 'Dates and predictions — when your periods were and when the next one is expected. '
+    + 'Predictions account for birth control, without naming the method.',
   symptoms: 'Dates, flow and symptoms — the above plus flow, cramps, spotting, PMS, mood, discharge and test results.',
   everything: 'Everything — the above plus your written notes.',
 };
 
 const SPAN_FIELDS = ['start', 'end', 'precision', 'endPrecision', 'source'];
 const GAP_FIELDS = ['from', 'to', 'reason'];
-const EPISODE_FIELDS = ['startedOn', 'endedOn', 'method', 'expectedEffect'];
+
+// The dates scope exists to withhold exactly this: starting or stopping a
+// method is a fact someone picks the narrowest scope to keep private. Its
+// *effect* on timing still has to travel — `expectedEffect` is what lets his
+// predictions match hers — but the method's name does not.
+const EPISODE_FIELDS = {
+  dates: ['startedOn', 'endedOn', 'expectedEffect'],
+  symptoms: ['startedOn', 'endedOn', 'method', 'expectedEffect'],
+  everything: ['startedOn', 'endedOn', 'method', 'expectedEffect'],
+};
 
 // Day fields per scope. `dates` has no entry here because it carries no days
 // at all: the spans alone say when she bled.
@@ -75,7 +85,7 @@ export function projectDocument(doc, scope) {
     version: 1,
     spans: (doc.spans ?? []).map(span => pick(span, SPAN_FIELDS)),
     gaps: (doc.gaps ?? []).map(gap => pick(gap, GAP_FIELDS)),
-    birthControl: (doc.birthControl ?? []).map(episode => pick(episode, EPISODE_FIELDS)),
+    birthControl: (doc.birthControl ?? []).map(episode => pick(episode, EPISODE_FIELDS[scope])),
     days,
   };
 }

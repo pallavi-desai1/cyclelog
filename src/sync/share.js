@@ -71,8 +71,31 @@ export function withoutSharing(doc) {
   return next;
 }
 
-export function describePush(lastPush) {
+// Named locally rather than pulled from SCOPE_LABELS: this message is read
+// in a half-sentence ("he still holds the <x> copy"), not as the standalone
+// choice SCOPE_LABELS describes on the setup form.
+const SCOPE_NAMES = {
+  dates: 'dates and predictions',
+  symptoms: 'dates, flow and symptoms',
+  everything: 'everything',
+};
+
+// `scope` is the state's CURRENT scope, so this can tell her a push already
+// in flight (or one that never landed) left him holding a copy made under a
+// different scope than the one she has now chosen — Critical 3's second
+// half: a narrowed scope that has not reached him yet must read as exactly
+// that, not as "Shared with him", which `lastPush.status === 'ok'` alone
+// would otherwise say about a copy he no longer should have.
+export function describePush(lastPush, scope = null) {
   if (lastPush === null) return 'Nothing has been shared yet.';
+  if (lastPush.status === 'pending') {
+    return `Sending what you saved on ${lastPush.at}…`;
+  }
+  if (scope !== null && lastPush.scope && lastPush.scope !== scope) {
+    const held = SCOPE_NAMES[lastPush.scope] ?? lastPush.scope;
+    return `He still holds the ${held} copy sent ${lastPush.at} — `
+      + 'the scope has changed since and has not reached him yet.';
+  }
   if (lastPush.status === 'ok') return `Shared with him on ${lastPush.at}.`;
   if (lastPush.status === 'offline') {
     return `Not sent yet — last tried ${lastPush.at}. It will go when you are back online.`;

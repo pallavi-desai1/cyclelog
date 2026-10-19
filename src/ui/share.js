@@ -33,7 +33,7 @@ export function renderShareCard({ state, fingerprint, ownerUid }) {
     return parts.join('');
   }
 
-  parts.push(`<p class="share-status">${escapeHtml(describePush(state.lastPush))}</p>`);
+  parts.push(`<p class="share-status">${escapeHtml(describePush(state.lastPush, state.scope))}</p>`);
   if (ownerUid) {
     parts.push('<p>Your sync id, which he types into his app:</p>');
     parts.push(`<p><code id="share-uid">${escapeHtml(ownerUid)}</code></p>`);

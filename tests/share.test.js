@@ -176,6 +176,28 @@ describe('the push result', () => {
   it('says nothing has been sent when nothing has', () => {
     expect(describePush(null)).toMatch(/not .*shared|nothing/i);
   });
+
+  // Critical 3: a card that cannot distinguish "queued" from "delivered"
+  // is the card that read "Shared with him" about data he never received.
+  it('describes a pending push as sending, not as shared', () => {
+    const pending = describePush({ at: '2015-03-26', status: 'pending', scope: 'dates' });
+    expect(pending).toMatch(/sending/i);
+    expect(pending).not.toMatch(/^shared/i);
+  });
+
+  // Critical 3's second half: a narrowed scope that has not landed yet must
+  // read differently from one that has, even if the last attempt reported
+  // 'ok' — he is still holding whatever the earlier, wider push sent.
+  it('says he still holds a different scope than the one now set, even over an "ok" result', () => {
+    const stale = describePush({ at: '2015-03-26', status: 'ok', scope: 'everything' }, 'dates');
+    expect(stale).not.toMatch(/^shared/i);
+    expect(stale).toMatch(/still holds|scope has changed/i);
+  });
+
+  it('describes an ordinary success normally once the scope matches', () => {
+    expect(describePush({ at: '2015-03-26', status: 'ok', scope: 'dates' }, 'dates'))
+      .toMatch(/shared with him/i);
+  });
 });
 
 describe('buildPayload', () => {

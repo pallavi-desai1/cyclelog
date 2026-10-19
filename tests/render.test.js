@@ -50,6 +50,16 @@ describe('the summary card', () => {
     expect(html).toContain('2015-06-01');
   });
 
+  // Critical 4: a scope-narrowed shared document carries an episode whose
+  // name was stripped. buildSummary already turns that into method: null
+  // (tested in summary.test.js); this pins the renderer's half — it must
+  // not print a "Method:" line with an empty or undefined value.
+  it('omits the Method line entirely when the episode has no method name', () => {
+    const noName = [{ startedOn: '2015-06-01', endedOn: null, expectedEffect: 'suppress' }];
+    const html = render(doc(noName), '2015-07-15');
+    expect(html).not.toMatch(/Method/);
+  });
+
   it('shows how many days late when a period is overdue', () => {
     expect(render(doc(REGULATE), '2015-07-15')).toContain('83 days late');
   });

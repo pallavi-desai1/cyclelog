@@ -57,11 +57,22 @@ describe('every scope', () => {
     }
   });
 
-  it('keeps the gaps and the birth control, so his predictions match hers', () => {
+  it('keeps the gaps for every scope, so his predictions match hers', () => {
     for (const scope of SCOPES) {
-      const projected = projectDocument(doc(), scope);
-      expect(projected.gaps, scope).toEqual(doc().gaps);
-      expect(projected.birthControl, scope).toEqual(doc().birthControl);
+      expect(projectDocument(doc(), scope).gaps, scope).toEqual(doc().gaps);
+    }
+  });
+
+  // Critical 4: the dates scope exists to withhold exactly this — starting
+  // or stopping a method is the fact someone picks the narrowest scope to
+  // keep private. Its timing effect still has to travel (expectedEffect is
+  // what lets his predictions match hers); the method's name does not.
+  it('keeps the birth control episode, but drops the method name at the dates scope only', () => {
+    expect(projectDocument(doc(), 'dates').birthControl).toEqual([
+      { startedOn: '2015-02-01', endedOn: null, expectedEffect: 'regulate' },
+    ]);
+    for (const scope of ['symptoms', 'everything']) {
+      expect(projectDocument(doc(), scope).birthControl, scope).toEqual(doc().birthControl);
     }
   });
 
@@ -91,6 +102,20 @@ describe('the dates scope', () => {
     for (const leak of ['heavy', 'severe', 'creamy', 'headache', 'sad', 'a private thought']) {
       expect(text, leak).not.toContain(leak);
     }
+  });
+
+  // Critical 4: confirmed on the live app — at this scope the projection
+  // used to send `method: 'pill'` under a label that said only "when your
+  // periods were". Starting or stopping contraception is exactly what
+  // someone picks this scope to withhold.
+  it('carries no contraceptive method name', () => {
+    expect(JSON.stringify(projected())).not.toContain('pill');
+    expect('method' in projected().birthControl[0]).toBe(false);
+  });
+
+  it('says in the label that predictions account for birth control, without naming it', () => {
+    expect(SCOPE_LABELS.dates).toMatch(/birth control/i);
+    expect(SCOPE_LABELS.dates).not.toMatch(/pill|implant|iud/i);
   });
 });
 

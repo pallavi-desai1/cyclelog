@@ -236,11 +236,21 @@ describe('viewer grants', () => {
   it('writes a grant at the path the rules check', async () => {
     const { fetchImpl, calls } = stubFetch([ok({})]);
     await grantViewer({
-      ...PROJECT, viewerUid: 'viewer-uid', label: 'partner', grantedAt: '2015-03-26', fetchImpl,
+      ...PROJECT, viewerUid: 'viewer-uid', grantedAt: '2015-03-26', fetchImpl,
     });
     expect(calls[0].url).toContain('/vaults/owner-uid/viewers/viewer-uid');
     expect(calls[0].method).toBe('PATCH');
-    expect(calls[0].body.fields.label).toEqual({ stringValue: 'partner' });
+    expect(calls[0].body.fields.grantedAt).toEqual({ stringValue: '2015-03-26' });
+  });
+
+  // Critical 2: "What to call him" is free text, read by nobody but her own
+  // app — grantViewer must never be asked to send it, and the fields that
+  // actually reach the server must carry no name, label or other prose.
+  it('sends no free text in the grant document', async () => {
+    const { fetchImpl, calls } = stubFetch([ok({})]);
+    await grantViewer({ ...PROJECT, viewerUid: 'viewer-uid', grantedAt: '2015-03-26', fetchImpl });
+    expect(Object.keys(calls[0].body.fields)).toEqual(['grantedAt']);
+    expect(JSON.stringify(calls[0].body)).not.toMatch(/label|partner|name/i);
   });
 
   it('deletes a grant to revoke', async () => {
@@ -253,7 +263,7 @@ describe('viewer grants', () => {
   it('encodes a viewer uid containing path-sensitive characters into the viewer document path', async () => {
     const { fetchImpl, calls } = stubFetch([ok({})]);
     await grantViewer({
-      ...PROJECT, viewerUid: 'viewer/uid', label: 'partner', grantedAt: '2015-03-26', fetchImpl,
+      ...PROJECT, viewerUid: 'viewer/uid', grantedAt: '2015-03-26', fetchImpl,
     });
     expect(calls[0].url).toContain('viewers/viewer%2Fuid');
   });

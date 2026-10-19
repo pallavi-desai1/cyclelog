@@ -189,13 +189,19 @@ export async function getVault({ projectId, idToken, ownerUid, fetchImpl }) {
   }
 }
 
+// Critical 2: no free text travels here. "What to call him" is hers alone —
+// kept locally by withViewer — and uploading it would put his name on
+// Google's servers in cleartext, which is exactly what anonymous auth was
+// chosen to avoid. `grantedAt` is kept because existence is the grant;
+// dropping it would cost nothing, but it is harmless and lets her see when
+// she granted him without decrypting anything.
 export async function grantViewer({
-  projectId, idToken, ownerUid, viewerUid, label, grantedAt, fetchImpl,
+  projectId, idToken, ownerUid, viewerUid, grantedAt, fetchImpl,
 }) {
   await request(
     fetchImpl,
     documentUrl(projectId, `vaults/${segment(ownerUid)}/viewers/${segment(viewerUid)}`),
-    patch(idToken, toFields({ label, grantedAt })),
+    patch(idToken, toFields({ grantedAt })),
   );
 }
 

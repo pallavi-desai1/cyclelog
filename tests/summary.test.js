@@ -71,6 +71,17 @@ describe('the doctor-appointment facts', () => {
     expect(buildSummary(doc(), '2015-04-20').method).toBeNull();
   });
 
+  // Critical 4 (whole-branch review): a document shared at the `dates`
+  // scope carries an episode with no `method` field at all — the
+  // projection strips the name but keeps startedOn/endedOn/expectedEffect,
+  // which his predictions still need. That must produce no method object
+  // at all, not one with an undefined name a renderer would print as an
+  // empty label.
+  it('produces no method object when the episode has no method name, as a scope-narrowed share carries', () => {
+    const noName = [{ startedOn: '2015-06-01', endedOn: null, expectedEffect: 'suppress' }];
+    expect(buildSummary(doc(noName), '2015-07-15').method).toBeNull();
+  });
+
   it('has no last period when nothing is logged', () => {
     const empty = { version: 1, days: {}, spans: [], gaps: [], birthControl: [] };
     expect(buildSummary(empty, '2015-07-15').lastPeriod).toBeNull();
