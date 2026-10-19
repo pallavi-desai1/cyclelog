@@ -45,6 +45,26 @@
   <button id="create" type="button">Create my vault</button>
   <p id="setup-progress" role="status"></p>
   <p id="setup-error" role="alert"></p>
+
+  <details id="setup-viewer">
+    <summary>Setting up as a partner instead?</summary>
+    <p>He gets a read-only view of her cycle on his own phone — no document
+       of his own, no editor, no way to change anything. Set the passphrase
+       above first, then enter what she gave him here.</p>
+    <label for="viewer-owner-uid">Her sync id</label>
+    <input id="viewer-owner-uid" type="text" autocapitalize="off" spellcheck="false">
+    <label for="viewer-key">Her key</label>
+    <input id="viewer-key" type="text" autocapitalize="off" spellcheck="false">
+    <button id="viewer-create" type="button">Set up as viewer</button>
+    <p id="viewer-fingerprint" role="status"></p>
+  </details>
+</main>
+
+<main id="viewer-screen" class="screen" hidden>
+  <div id="viewer"></div>
+  <button id="viewer-refresh" type="button">Refresh</button>
+  <p id="viewer-error" role="alert"></p>
+  <button id="viewer-lock" type="button">Lock</button>
 </main>
 
 <main id="app" class="screen" hidden>

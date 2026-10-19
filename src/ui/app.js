@@ -32,8 +32,10 @@ import {
   shareState, withSharing, withScope, withIdentity, withViewer, withoutViewer,
   withPushResult, withoutSharing, buildPayload,
 } from '../sync/share.js';
-import { generateSyncKey, fingerprint } from '../sync/key.js';
+import { generateSyncKey, fingerprint, importSyncKey } from '../sync/key.js';
 import { signInAnonymously, refreshIdToken, putVault, grantViewer, revokeViewer } from '../sync/firestore.js';
+import { viewerRecord, parseViewerRecord, isViewerRecord, fetchShared } from '../sync/viewer.js';
+import { renderViewerHeader } from './viewer.js';
 import { FIREBASE } from '../config.js';
 
 if ('serviceWorker' in navigator) {
@@ -56,7 +58,7 @@ const say = (id, message) => {
 };
 
 function screen(name) {
-  for (const id of ['setup', 'lock', 'app']) {
+  for (const id of ['setup', 'lock', 'app', 'viewer-screen']) {
     if (id === name) show(id); else hide(id);
   }
 }
@@ -73,6 +75,11 @@ function returnToLock() {
   closePicker();
   el('day-detail').innerHTML = '';
   el('share').innerHTML = '';
+  // His cached copy of her data is held only in memory (viewerShared) and in
+  // the DOM this clears — never written anywhere his vault would persist it
+  // past the lock.
+  el('viewer').innerHTML = '';
+  say('viewer-error', '');
   // A push timer armed before the lock must not fire against a document
   // that no longer exists in memory — openDoc is cleared a few lines down.
   if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
@@ -82,6 +89,10 @@ function returnToLock() {
   // calendar is the one place it was being held outside the vault.
   openDoc = null;
   openSummary = null;
+  // Same rule for his side: the record and the cached, decrypted copy of her
+  // data must not survive his lock either.
+  viewerRecordData = null;
+  viewerShared = null;
   // The editing draft lives only in the DOM the lock screen is about to
   // replace, but the flag that says "a form is open" is state in this
   // module, and must not survive to the next unlock.
@@ -109,6 +120,15 @@ let openDoc = null;
 let openSummary = null;
 let viewMonth = null;
 let selectedDate = null;
+
+// His side: the vault holds a viewer record instead of a document, so there
+// is nothing here matching openDoc's shape. viewerRecordData is the parsed
+// record (whose uid to fetch, the key, his identity); viewerShared is the
+// last successful fetch — held only in memory, dropped by returnToLock
+// exactly as openDoc is. Never written back to the vault: his cache of her
+// data lives in RAM for the length of his session, nowhere else.
+let viewerRecordData = null;
+let viewerShared = null;
 
 // The date currently open in the editor, or null when the day panel is
 // showing its read-only view instead. Cleared by returnToLock, by a
@@ -162,7 +182,14 @@ async function paint(note = '') {
   // that failed is unsavedWarning's problem to surface, not a reason to
   // block getting back into the app.
   await pendingSave?.catch(() => {});
-  openDoc = parseDocument(vault.read());
+  const content = vault.read();
+  // The vault code is unchanged either way — his record is just what his
+  // vault happens to hold. Nothing else in this function applies to it.
+  if (isViewerRecord(content)) {
+    await paintViewer();
+    return;
+  }
+  openDoc = parseDocument(content);
   openSummary = buildSummary(openDoc, localToday());
   el('summary').innerHTML = renderSummary(openSummary);
   if (unsavedWarning !== null) {
@@ -625,6 +652,130 @@ async function stopSharing() {
   }
 }
 
+// His side. No editor, no save, no write path at all — the server rules
+// enforce that independently (Task 7), but this file carries none of the
+// machinery that would need enforcing against in the first place.
+
+// A mistyped key fails here, loudly, through the tested importSyncKey, not
+// later as an opaque decrypt failure with no obvious cause. His vault is the
+// same vault code hers uses — this is just what it happens to hold.
+async function createViewer() {
+  if (el('viewer-create').disabled) return;
+  el('viewer-create').disabled = true;
+  try {
+    const ownerUid = el('viewer-owner-uid').value.trim();
+    const keyText = el('viewer-key').value.trim();
+    const passphrase = el('setup-passphrase').value;
+    if (ownerUid === '') return say('setup-error', 'Enter her sync id first.');
+    if (passphrase.length < 8) return say('setup-error', 'Use at least 8 characters.');
+    if (passphrase !== el('setup-confirm').value) return say('setup-error', 'The two passphrases differ.');
+
+    say('setup-error', '');
+    await importSyncKey(keyText);
+    say('viewer-fingerprint', `Fingerprint: ${await fingerprint(keyText)} — check it matches her screen.`);
+
+    const identity = await signInAnonymously({ apiKey: FIREBASE.apiKey, fetchImpl: fetch });
+    await vault.setup(passphrase, viewerRecord({
+      ownerUid,
+      key: keyText,
+      identity: { uid: identity.uid, refreshToken: identity.refreshToken },
+    }));
+    hasVault = true;
+    clear('setup-passphrase');
+    clear('setup-confirm');
+    // His uid, for him to read back to her so she can grant him access —
+    // this is the only direction his identity travels on its own.
+    say('setup-progress', `Your sync id (read it to her so she can grant access): ${identity.uid}`);
+    await paintViewer();
+  } catch {
+    say('setup-progress', '');
+    say('setup-error', 'Something went wrong. Please try again.');
+  } finally {
+    el('viewer-create').disabled = false;
+  }
+}
+
+// Fetches, decrypts and caches her data in memory only — it never reaches
+// his vault. A failure is recorded in #viewer-error, never flattened into a
+// cleared cache: a decrypt failure or a revoked grant must say so, not leave
+// an old render on screen looking current, and must not silently empty the
+// calendar either (which would read as "she has logged nothing").
+async function refreshViewer() {
+  if (viewerRecordData === null) return;
+  try {
+    const refreshed = await refreshIdToken({
+      apiKey: FIREBASE.apiKey, refreshToken: viewerRecordData.identity.refreshToken, fetchImpl: fetch,
+    });
+    if (viewerRecordData === null) return;
+    const result = await fetchShared({
+      record: viewerRecordData, idToken: refreshed.idToken, projectId: FIREBASE.projectId, fetchImpl: fetch,
+    });
+    if (viewerRecordData === null) return;
+    if (result === null) {
+      say('viewer-error', 'Nothing has been shared with you yet.');
+      return;
+    }
+    viewerShared = result;
+    say('viewer-error', '');
+  } catch (error) {
+    if (viewerRecordData === null) return;
+    const kind = error && error.kind;
+    // Only a connectivity problem leaves the cache in place — and only
+    // because it says, in words, that what is on screen is the last copy
+    // and not a current one. Every other failure (a revoked grant, a key
+    // that can no longer open what she sent, a version or server error)
+    // clears it: showing yesterday's calendar as though it answers today's
+    // question is exactly the lie this screen exists to avoid telling.
+    if (kind === 'offline') {
+      say('viewer-error', viewerShared === null
+        ? 'No connection, and nothing is cached yet.'
+        : `No connection — showing the last copy from ${viewerShared.updatedAt}.`);
+      return;
+    }
+    viewerShared = null;
+    if (kind === 'denied') {
+      say('viewer-error', 'She has stopped sharing, or the grant was removed.');
+    } else if (error && error.name === 'OperationError') {
+      // AES-GCM's own failure name for a wrong key or a tampered payload —
+      // never flattened into an empty calendar, which would read as "she
+      // has logged nothing".
+      say('viewer-error', 'That could not be read with this key. Check it against her screen.');
+    } else {
+      say('viewer-error', 'Something went wrong. Please try again.');
+    }
+  }
+}
+
+// Renders her data with the same tested renderers the owner's screen uses —
+// no editor, no save, no write path. Read-only is not a hidden button: this
+// function must never reference renderEditor, applyDayEdit or openEditor.
+//
+// The whole pane is one render target (#viewer), rebuilt in a single
+// assignment every time this runs — on open, and on every explicit refresh.
+// That is deliberate: returnToLock clears #viewer wholesale (so his cache of
+// her data cannot survive a lock), which means nothing inside it can be a
+// persistent, individually-addressed node — only #viewer itself, and the
+// static controls outside it, survive from one paint to the next.
+async function paintViewer() {
+  viewerRecordData = parseViewerRecord(vault.read());
+  await refreshViewer();
+  if (viewerRecordData === null) return; // locked mid-refresh
+  if (viewerShared === null) {
+    el('viewer').innerHTML = renderViewerHeader({ scope: null, updatedAt: null, label: '' });
+  } else {
+    const { doc, scope, updatedAt } = viewerShared;
+    const summary = buildSummary(doc, localToday());
+    const grid = monthGrid(doc, {
+      month: monthOf(localToday()), todayISO: localToday(),
+      adaptedDate: summary.adapted.date, baselineDates: [],
+    });
+    el('viewer').innerHTML = renderViewerHeader({ scope, updatedAt, label: 'her' })
+      + renderSummary(summary)
+      + renderCalendar(grid);
+  }
+  screen('viewer-screen');
+}
+
 // The picker is built from the document, so its range covers exactly the
 // months she has anything in — paging to 2015 one arrow at a time is not a
 // navigation method.
@@ -1010,6 +1161,12 @@ el('share').addEventListener('click', event => {
 });
 el('share').addEventListener('change', event => {
   if (event.target.id === 'share-scope') changeShareScope();
+});
+el('viewer-create').addEventListener('click', () => { createViewer(); });
+el('viewer-refresh').addEventListener('click', () => { paintViewer(); });
+el('viewer-lock').addEventListener('click', () => {
+  vault.lock();
+  returnToLock();
 });
 el('export-backup').addEventListener('click', () => { exportBackup(); });
 el('export-data').addEventListener('click', () => { exportPlaintext('data'); });

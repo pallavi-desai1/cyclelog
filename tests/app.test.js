@@ -96,6 +96,8 @@ describe('app wiring', () => {
       'renderMonthPicker({ month: viewMonth, range: monthRange(openDoc, localToday()), })',
       'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
       "renderShareCard({ state, fingerprint: state.key === null ? '' : await fingerprint(state.key), ownerUid: state.identity === null ? null : state.identity.uid, })",
+      "renderViewerHeader({ scope: null, updatedAt: null, label: '' })",
+      "renderViewerHeader({ scope, updatedAt, label: 'her' }) + renderSummary(summary) + renderCalendar(grid)",
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
       expect(allowed).toContain(squash(expression));
@@ -198,9 +200,9 @@ describe('idle locking', () => {
     const helper = functionBody(text, 'returnToLock');
     const inHelper = (helper.match(/innerHTML = ''/g) || []).length;
     const everywhere = (text.match(/innerHTML = ''/g) || []).length;
-    expect(inHelper).toBe(4);             // the summary, the calendar, the day panel and the share card
+    expect(inHelper).toBe(5);             // the summary, the calendar, the day panel, the share card and his viewer pane
     expect(helper).toMatch(/closePicker\(\)/);   // the picker, through its own helper
-    // Those four are the only sites that clear rendered markup, so there is
+    // Those five are the only sites that clear rendered markup, so there is
     // exactly one place that can forget a pane.
     expect(everywhere).toBe(inHelper + 1);
   });
@@ -976,5 +978,57 @@ describe('the owner side of sharing', () => {
     expect(body, 'stopSharing').not.toBeNull();
     const catchBlock = body.slice(body.indexOf('} catch'));
     expect(catchBlock).toMatch(/still on/i);
+  });
+});
+
+describe('the viewer mode', () => {
+  it('offers it on the setup screen', () => {
+    expect(html()).toContain('id="setup-viewer"');
+    expect(html()).toContain('id="viewer-owner-uid"');
+    expect(html()).toContain('id="viewer-key"');
+  });
+
+  it('has a screen of its own', () => {
+    expect(html()).toContain('id="viewer"');
+  });
+
+  it('stores his key and identity in his own vault, under his own passphrase', () => {
+    const body = functionBody(app(), 'createViewer');
+    expect(body, 'createViewer').not.toBeNull();
+    expect(body).toMatch(/viewerRecord\(/);
+    expect(body).toMatch(/vault\.setup\(/);
+  });
+
+  it('shows the fingerprint so he can check it against her screen', () => {
+    expect(functionBody(app(), 'createViewer')).toMatch(/fingerprint\(/);
+  });
+
+  // Review Focus 5: read-only is not a hidden button.
+  it('has no editor and no write path in viewer mode', () => {
+    const body = functionBody(app(), 'paintViewer');
+    expect(body, 'paintViewer').not.toBeNull();
+    expect(body).not.toMatch(/renderEditor|applyDayEdit|openEditor/);
+  });
+
+  it('renders her data with the same tested renderers', () => {
+    const body = functionBody(app(), 'paintViewer');
+    expect(body).toMatch(/renderSummary\(/);
+    expect(body).toMatch(/renderCalendar\(/);
+    expect(body).toMatch(/renderViewerHeader\(/);
+  });
+
+  it('refreshes on open and on an explicit refresh, since there is no push', () => {
+    expect(html()).toContain('id="viewer-refresh"');
+    expect(app()).toMatch(/viewer-refresh'\)\.addEventListener/);
+  });
+
+  it('tells him when a refresh was refused rather than showing stale data as current', () => {
+    const body = functionBody(app(), 'refreshViewer');
+    expect(body).toMatch(/catch/);
+    expect(body).toMatch(/viewer-error/);
+  });
+
+  it('drops her data from his screen when his vault locks', () => {
+    expect(functionBody(app(), 'returnToLock')).toMatch(/viewer'\)\.innerHTML = ''/);
   });
 });
