@@ -305,12 +305,11 @@ describe('sharing state never leaves in an export', () => {
   // Critical 1 (whole-branch review): the plaintext JSON export used to
   // carry `sharing` whole — the sync key, and worse, the refresh token that
   // mints the owner's own id tokens, letting anyone holding the file write
-  // her vault and grant viewers. documentJson is called at the export
-  // boundary on withoutSharing(doc), never on the raw document, which is
-  // what this test now pins: the export boundary strips it, not the
-  // formatter itself (documentJson still round-trips whatever it is given,
-  // proven above).
-  it('carries neither the key nor the refresh token once the export boundary strips sharing first', () => {
+  // her vault and grant viewers. The call site (src/ui/app.js) strips it
+  // via withoutSharing(doc) before calling documentJson — kept passing
+  // here as belt-and-braces evidence that the call site is still doing its
+  // part, even though documentJson no longer depends on it (below).
+  it('carries neither the key nor the refresh token when the call site strips sharing first', () => {
     const exported = documentJson(withoutSharing(shared));
     expect(exported).not.toContain('SECRETSYNCKEY');
     expect(exported).not.toContain('refresh-token');
@@ -320,12 +319,20 @@ describe('sharing state never leaves in an export', () => {
     expect(JSON.parse(exported).days).toEqual(shared.days);
   });
 
-  // documentJson itself must stay a pure, honest round-trip formatter — the
-  // stripping belongs at the export boundary (src/ui/app.js), not buried
-  // inside the formatter where a caller could not reason about what it
-  // does. Proven by exercising it directly on a document that still has
-  // sharing in it, same as the very first test in this file already does.
-  it('documentJson itself is a plain round-trip and does not strip anything on its own', () => {
-    expect(JSON.parse(documentJson(shared)).sharing).toEqual(shared.sharing);
+  // Hardened one layer deeper: the guarantee must not depend on every
+  // future caller remembering to strip sharing first. documentJson now
+  // strips it internally, so even a caller that hands it the raw,
+  // undecorated document — a restore preview, a debug dump, a
+  // share-to-clipboard nobody has written yet — gets a file with no key,
+  // no refresh token and no viewer, not a silently reintroduced leak that
+  // no test would catch.
+  it('strips sharing itself, whoever calls it and however they call it', () => {
+    const exported = documentJson(shared); // called directly, no withoutSharing at this call site
+    expect(JSON.parse(exported).sharing).toBeUndefined();
+    expect(exported).not.toContain('SECRETSYNCKEY');
+    expect(exported).not.toContain('refresh-token');
+    expect(exported).not.toContain('viewer-uid');
+    // Her history must survive the strip untouched.
+    expect(JSON.parse(exported).days).toEqual(shared.days);
   });
 });

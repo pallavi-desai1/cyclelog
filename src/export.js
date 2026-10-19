@@ -1,6 +1,7 @@
 // Spec §9: four outputs. The data is hers and must never be trapped in this
 // app. Everything here is a pure string builder — the Blob download lives in
 // the glue, so the formats themselves are testable.
+import { withoutSharing } from './sync/share.js';
 
 export const EXPORT_VERSION = 1;
 
@@ -90,8 +91,18 @@ export function cyclesCsv(cycles) {
   return `${lines.join('\n')}\n`;
 }
 
+// Critical 1, hardened one layer deeper: this is the human-facing plaintext
+// export, and the one place `sharing` — the sync key, and the refresh token
+// that mints her owner id tokens — must never reach a file on disk. The call
+// site (src/ui/app.js) already strips it before calling this, which is
+// correct but thin: it depends on every future caller remembering to. The
+// vault's own path never goes through here at all — it goes through
+// serializeDocument, straight to the encrypted store — so there is no
+// legitimate caller of this function that wants the sharing section in its
+// output. Stripping it here too, redundantly, costs nothing and means the
+// guarantee holds even if a later caller forgets.
 export function documentJson(doc) {
-  return `${JSON.stringify(doc, null, 2)}\n`;
+  return `${JSON.stringify(withoutSharing(doc), null, 2)}\n`;
 }
 
 // The encrypted backup: the sealed blob plus the non-secret key material
