@@ -218,29 +218,24 @@ export async function revokeViewer({ projectId, idToken, ownerUid, viewerUid, fe
   }
 }
 
-// Pulled out of listViewers so a malformed document — one with no name at
-// all — fails as a typed SyncError instead of a raw TypeError reaching the
-// caller. Thrown, not skipped: a document the API cannot even identify is
-// an anomaly worth surfacing, the same call made for an unreadable field
-// value above.
-function viewerUidFromName(name) {
-  if (typeof name !== 'string' || name.length === 0) {
-    throw new SyncError('server', 'malformed viewer document: missing name');
-  }
-  return name.split('/').pop();
-}
+// Critical 2: nothing in this file reads a viewer's label back out, so
+// nothing here may write one either. listViewers used to exist for this and
+// had no caller at all — dead code that read a field nobody writes is
+// exactly the shape that makes a future "just add it back" look free.
 
-export async function listViewers({ projectId, idToken, ownerUid, fetchImpl }) {
-  const body = await request(fetchImpl, documentUrl(projectId, `vaults/${segment(ownerUid)}/viewers`), {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${idToken}` },
-  });
-  return (body.documents ?? []).map(document => {
-    const fields = fromFields(document.fields);
-    return {
-      uid: viewerUidFromName(document.name),
-      label: fields.label ?? '',
-      grantedAt: fields.grantedAt ?? null,
-    };
-  });
+// Important 5: "Stop sharing" must not orphan the ciphertext on Google's
+// servers. Deleting the owner document is what makes revocation actually
+// remove the data, not just the ability to authenticate as the uid that
+// wrote it.
+export async function deleteVault({ projectId, idToken, ownerUid, fetchImpl }) {
+  try {
+    await request(fetchImpl, documentUrl(projectId, `vaults/${segment(ownerUid)}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+  } catch (error) {
+    // Already gone is the state she asked for.
+    if (error instanceof SyncError && error.status === 404) return;
+    throw error;
+  }
 }

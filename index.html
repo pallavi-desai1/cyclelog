@@ -64,6 +64,16 @@
   <div id="viewer"></div>
   <button id="viewer-refresh" type="button">Refresh</button>
   <p id="viewer-error" role="alert"></p>
+  <details id="viewer-rekey-details">
+    <summary>She sent a new key?</summary>
+    <p>If she pressed "New key", your old one stopped working. Get the new
+       one from her in person, the same way as the first time, and enter it
+       here — this does not need setting the vault up again.</p>
+    <label for="viewer-rekey-input">Her new key</label>
+    <input id="viewer-rekey-input" type="text" autocapitalize="off" spellcheck="false">
+    <button id="viewer-rekey" type="button">Save her new key</button>
+    <p id="viewer-rekey-fingerprint" role="status"></p>
+  </details>
   <button id="viewer-lock" type="button">Lock</button>
 </main>
 

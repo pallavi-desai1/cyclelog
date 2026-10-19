@@ -77,10 +77,14 @@ describe('fingerprint', () => {
     expect(await fingerprint(bent)).not.toBe(await fingerprint(key));
   });
 
-  it('is derived from the key, not stored with it', async () => {
-    // Same input, different process: a hash, not a random tag.
-    expect(await fingerprint('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'))
-      .toBe(await fingerprint('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'));
+  // Pinned against an independently computed SHA-256 digest (not derived
+  // from this module): `sha256("A".repeat(43))` hex-encoded starts with
+  // `0f0073`. Nothing else here would catch a changed derivation — every
+  // other test above compares the function's own output against itself,
+  // which a broken-but-consistent change would still pass, and every
+  // paired device would silently stop matching.
+  it('matches an independently computed SHA-256 digest', async () => {
+    expect(await fingerprint('A'.repeat(43))).toBe('0F0073');
   });
 });
 

@@ -1,7 +1,12 @@
 import { sealPayload, importSyncKey } from './key.js';
 import { projectDocument } from './scope.js';
 
-export const SHARE_SCHEMA_VERSION = 1;
+// Bumped for Important 7: the sealed plaintext's shape changed from the
+// projected document itself to `{ document, scope, updatedAt }`. A payload
+// built under version 1 would decrypt but parseDocument would choke on
+// `sealed.document` being undefined — refusing it by version, rather than
+// surfacing that as an opaque parse error, is what this check exists for.
+export const SHARE_SCHEMA_VERSION = 2;
 
 const DEFAULTS = { key: null, scope: 'dates', viewers: [], identity: null, lastPush: null };
 
@@ -111,7 +116,16 @@ export async function buildPayload(doc, { key, scope, updatedAt }) {
   // projectDocument throws on an unknown scope, which is the behaviour we
   // want: an unrecognised scope must never fall back to sending everything.
   const projected = projectDocument(doc, scope);
-  const sealed = await sealPayload(await importSyncKey(key), JSON.stringify(projected));
+  // Important 7: scope and updatedAt travel sealed, inside the ciphertext,
+  // not merely alongside it. The outer copies below are kept too, but only
+  // for Firestore indexing (so the console can show something without
+  // decrypting) — the host that holds the document also controls those
+  // plaintext fields, and could relabel the scope or replay a stale
+  // updatedAt. The viewer trusts only what came out of the AEAD.
+  const sealed = await sealPayload(
+    await importSyncKey(key),
+    JSON.stringify({ document: projected, scope, updatedAt }),
+  );
   return {
     ciphertext: sealed.ciphertext,
     iv: sealed.iv,

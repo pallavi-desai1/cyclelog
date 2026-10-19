@@ -4,6 +4,7 @@ import {
 } from '../src/sync/viewer.js';
 import { renderViewerHeader } from '../src/ui/viewer.js';
 import { generateSyncKey, importSyncKey, sealPayload } from '../src/sync/key.js';
+import { SHARE_SCHEMA_VERSION } from '../src/sync/share.js';
 
 const record = () => ({
   ownerUid: 'owner-uid',
@@ -16,6 +17,14 @@ const shared = { version: 1, spans: [{ start: '2015-01-29', end: '2015-02-02', s
 function stubFetch(response) {
   return async () => ({ ok: true, status: 200, json: async () => response });
 }
+
+// Important 7: scope and updatedAt travel sealed, inside the ciphertext,
+// alongside the document — not merely as the outer Firestore fields a host
+// could relabel or replay. This builds what buildPayload actually produces,
+// so fetchShared is exercised against its real shape, not a hand-rolled one.
+const sealedWrapper = (key, { scope = 'dates', updatedAt = '2015-03-26' } = {}) => (
+  sealPayload(key, JSON.stringify({ document: shared, scope, updatedAt }))
+);
 
 describe('the viewer record', () => {
   it('round-trips', () => {
@@ -44,7 +53,7 @@ describe('the viewer record', () => {
 describe('fetchShared', () => {
   it('decrypts what the owner wrote', async () => {
     const mine = record();
-    const sealed = await sealPayload(await importSyncKey(mine.key), JSON.stringify(shared));
+    const sealed = await sealedWrapper(await importSyncKey(mine.key));
     const result = await fetchShared({
       record: mine,
       idToken: 'id',
@@ -54,11 +63,39 @@ describe('fetchShared', () => {
           iv: { stringValue: sealed.iv },
           scope: { stringValue: 'dates' },
           updatedAt: { stringValue: '2015-03-26' },
-          schemaVersion: { integerValue: '1' },
+          schemaVersion: { integerValue: String(SHARE_SCHEMA_VERSION) },
         },
       }),
     });
     expect(result.doc).toEqual(shared);
+    expect(result.scope).toBe('dates');
+    expect(result.updatedAt).toBe('2015-03-26');
+  });
+
+  // Important 7: the outer Firestore fields are forged here to say
+  // something different from what was sealed — proving the viewer reads
+  // scope and updatedAt from the AEAD-protected copy, which the host
+  // cannot have relabelled, rather than from fields the host does control.
+  it('trusts the sealed scope and updatedAt, not the outer Firestore fields', async () => {
+    const mine = record();
+    const sealed = await sealedWrapper(await importSyncKey(mine.key), {
+      scope: 'dates', updatedAt: '2015-03-26',
+    });
+    const result = await fetchShared({
+      record: mine,
+      idToken: 'id',
+      fetchImpl: stubFetch({
+        fields: {
+          ciphertext: { stringValue: sealed.ciphertext },
+          iv: { stringValue: sealed.iv },
+          // Forged: a host (or a tampered response) claiming a wider scope
+          // and a newer date than what the owner actually sealed.
+          scope: { stringValue: 'everything' },
+          updatedAt: { stringValue: '2016-01-01' },
+          schemaVersion: { integerValue: String(SHARE_SCHEMA_VERSION) },
+        },
+      }),
+    });
     expect(result.scope).toBe('dates');
     expect(result.updatedAt).toBe('2015-03-26');
   });
@@ -75,14 +112,14 @@ describe('fetchShared', () => {
   // logged anything", which is a lie about her body.
   it('throws when the key cannot open it', async () => {
     const mine = record();
-    const sealed = await sealPayload(await importSyncKey(generateSyncKey()), JSON.stringify(shared));
+    const sealed = await sealedWrapper(await importSyncKey(generateSyncKey()));
     await expect(fetchShared({
       record: mine, idToken: 'id',
       fetchImpl: stubFetch({
         fields: {
           ciphertext: { stringValue: sealed.ciphertext }, iv: { stringValue: sealed.iv },
           scope: { stringValue: 'dates' }, updatedAt: { stringValue: '2015-03-26' },
-          schemaVersion: { integerValue: '1' },
+          schemaVersion: { integerValue: String(SHARE_SCHEMA_VERSION) },
         },
       }),
     })).rejects.toThrow();
@@ -97,7 +134,7 @@ describe('fetchShared', () => {
 
   it('refuses a payload from a schema version it does not understand', async () => {
     const mine = record();
-    const sealed = await sealPayload(await importSyncKey(mine.key), JSON.stringify(shared));
+    const sealed = await sealedWrapper(await importSyncKey(mine.key));
     await expect(fetchShared({
       record: mine, idToken: 'id',
       fetchImpl: stubFetch({

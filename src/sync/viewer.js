@@ -41,9 +41,14 @@ export async function fetchShared({ record, idToken, fetchImpl, projectId }) {
     throw new SyncError('server', `unsupported shared version ${payload.schemaVersion}`);
   }
   const plaintext = await openPayload(await importSyncKey(record.key), payload);
+  // Important 7: scope and updatedAt are read from the sealed copy, never
+  // from the outer Firestore fields — the host controls those, and could
+  // relabel the scope or replay an older updatedAt without the key. Only
+  // what the AEAD actually authenticated is trusted here.
+  const sealed = JSON.parse(plaintext);
   return {
-    doc: parseDocument(plaintext),
-    scope: payload.scope,
-    updatedAt: payload.updatedAt,
+    doc: parseDocument(JSON.stringify(sealed.document)),
+    scope: sealed.scope,
+    updatedAt: sealed.updatedAt,
   };
 }

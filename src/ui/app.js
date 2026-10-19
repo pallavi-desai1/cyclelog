@@ -33,7 +33,9 @@ import {
   withPushResult, withoutSharing, buildPayload,
 } from '../sync/share.js';
 import { generateSyncKey, fingerprint, importSyncKey } from '../sync/key.js';
-import { signInAnonymously, refreshIdToken, putVault, grantViewer, revokeViewer } from '../sync/firestore.js';
+import {
+  signInAnonymously, refreshIdToken, putVault, grantViewer, revokeViewer, deleteVault,
+} from '../sync/firestore.js';
 import { viewerRecord, parseViewerRecord, isViewerRecord, fetchShared } from '../sync/viewer.js';
 import { renderViewerHeader } from './viewer.js';
 import { FIREBASE } from '../config.js';
@@ -80,6 +82,11 @@ function returnToLock() {
   // past the lock.
   el('viewer').innerHTML = '';
   say('viewer-error', '');
+  // Static markup, not part of #viewer's innerHTML, so the clear above does
+  // not reach it — a typed key left sitting here across a lock is the same
+  // plaintext-input exposure createViewer already guards against.
+  clear('viewer-rekey-input');
+  say('viewer-rekey-fingerprint', '');
   // A push timer armed before the lock must not fire against a document
   // that no longer exists in memory — openDoc is cleared a few lines down.
   if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
@@ -374,8 +381,12 @@ async function saveDay() {
     el('summary').innerHTML = renderSummary(openSummary);
     drawCalendar();
     // Not awaited: her save just landed in the vault, and sending a copy to
-    // him is a courtesy that must never hold that up.
-    schedulePush();
+    // him is a courtesy that must never hold that up. Important 10: now
+    // that schedulePush itself awaits a vault write before arming the
+    // timer, a rejection from that write must not become an unhandled
+    // promise rejection the one place a fire-and-forget call like this one
+    // reaches it.
+    schedulePush().catch(() => {});
     if (outcome === 'adopt-only') return; // a different editor is open now; leave #day-detail alone
 
     editing = null;
@@ -542,7 +553,7 @@ async function startSharing() {
     const identity = await syncIdentity();
     if (openDoc === null || identity === null) return;
     await drawShare();
-    schedulePush();
+    schedulePush().catch(() => {});
   } catch (error) {
     if (openDoc === null) return;
     await drawShare();
@@ -558,7 +569,7 @@ async function changeShareScope() {
     await drawShare();
     // §7.6: the scope change re-encrypts the whole payload, so he needs it
     // pushed again, not just the next ordinary save.
-    schedulePush();
+    schedulePush().catch(() => {});
   } catch (error) {
     if (openDoc === null) return;
     await drawShare();
@@ -626,14 +637,24 @@ async function removeShareViewer(viewerUid) {
   }
 }
 
+// Important 9: a fresh key strands him silently — his refresh keeps failing
+// against a vault that still holds the old one, with no way from his screen
+// alone to tell "revoked" apart from "re-keyed". Naming it here, before it
+// happens, is the only warning he gets.
 async function rekeyShare() {
   if (openDoc === null) return;
+  const ok = window.confirm(
+    'His current key stops working the moment this is pushed. He will need '
+    + 'to be re-paired in person, the same way as the first time — read him '
+    + 'the new key and have him enter it on his phone. Generate a new key?',
+  );
+  if (!ok) return;
   try {
     const scope = shareState(openDoc).scope;
     await persistShareDoc(withSharing(openDoc, { key: generateSyncKey(), scope }));
     if (openDoc === null) return;
     await drawShare();
-    schedulePush();
+    schedulePush().catch(() => {});
   } catch (error) {
     if (openDoc === null) return;
     await drawShare();
@@ -663,6 +684,13 @@ async function stopSharing() {
         });
         if (openDoc === null) return;
       }
+      // Important 5: without this, the ciphertext document lives on
+      // forever — the key is about to be dropped from the document below,
+      // which is exactly what would make that document unauthenticatable
+      // AND undeletable: she could never again mint a token for the uid
+      // that wrote it. Delete it while she still can, before the key goes.
+      await deleteVault({ projectId: FIREBASE.projectId, idToken, ownerUid, fetchImpl: fetch });
+      if (openDoc === null) return;
     }
     if (openDoc === null) return;
     if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
@@ -715,6 +743,10 @@ async function createViewer() {
     // screen is gone.
     clear('viewer-owner-uid');
     clear('viewer-key');
+    // Important 6: create() offers this on the owner's device; it must be
+    // offered here too, or his vault is passphrase-only forever (spec §7.4
+    // step 5, Review Focus 5).
+    await offerFaceId();
     // His uid, for him to read back to her so she can grant him access —
     // this is the only direction his identity travels on its own.
     say('setup-progress', `Your sync id (read it to her so she can grant access): ${identity.uid}`);
@@ -728,6 +760,31 @@ async function createViewer() {
     clear('viewer-key');
   } finally {
     el('viewer-create').disabled = false;
+  }
+}
+
+// Important 9's other half: rekeyShare strands him the moment she presses
+// "New key", with no recovery but setting the vault up a second time — and
+// doing that would also mean choosing a new passphrase, losing nothing of
+// hers but costing him his own. This rewrites just the key inside his
+// existing vault record, in place, under his existing passphrase.
+async function rekeyViewer() {
+  if (el('viewer-rekey').disabled) return;
+  el('viewer-rekey').disabled = true;
+  try {
+    const keyText = el('viewer-rekey-input').value.trim();
+    await importSyncKey(keyText); // throws loudly on a mistyped key
+    say('viewer-rekey-fingerprint', `Fingerprint: ${await fingerprint(keyText)} — check it matches her screen.`);
+    const current = parseViewerRecord(vault.read());
+    await vault.save(viewerRecord({ ...current, key: keyText }));
+    clear('viewer-rekey-input');
+    say('viewer-error', '');
+    await paintViewer();
+  } catch {
+    say('viewer-rekey-fingerprint', '');
+    say('viewer-error', 'That is not a valid key. Check it against her screen and try again.');
+  } finally {
+    el('viewer-rekey').disabled = false;
   }
 }
 
@@ -1214,6 +1271,7 @@ el('share').addEventListener('change', event => {
 });
 el('viewer-create').addEventListener('click', () => { createViewer(); });
 el('viewer-refresh').addEventListener('click', () => { paintViewer(); });
+el('viewer-rekey').addEventListener('click', () => { rekeyViewer(); });
 el('viewer-lock').addEventListener('click', () => {
   vault.lock();
   returnToLock();

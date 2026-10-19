@@ -979,6 +979,72 @@ describe('the owner side of sharing', () => {
     const catchBlock = body.slice(body.indexOf('} catch'));
     expect(catchBlock).toMatch(/still on/i);
   });
+
+  // Important 5 (whole-branch review): without deleting the owner document,
+  // revoking every viewer and dropping the key still leaves the ciphertext
+  // sitting on Google's servers forever, and a later "Start sharing" mints
+  // a second orphan beside it. The delete has to happen before the key is
+  // dropped — it is the key (via the identity it unlocked) that lets her
+  // authenticate as the uid that owns the document at all.
+  it('deletes the vault document before dropping the key, so the ciphertext is not orphaned', () => {
+    const body = functionBody(app(), 'stopSharing');
+    const del = body.indexOf('deleteVault(');
+    const drop = body.indexOf('withoutSharing(');
+    expect(del, 'deleteVault(').toBeGreaterThan(-1);
+    expect(drop, 'withoutSharing(').toBeGreaterThan(-1);
+    expect(del).toBeLessThan(drop);
+  });
+
+  // Critical 2: grantViewer must never be handed a label — the field the
+  // old implementation sent as a plain stringValue, and the one thing
+  // §7.7 and the README both promise Google never sees.
+  it('never sends the viewer label to grantViewer', () => {
+    const body = functionBody(app(), 'addShareViewer');
+    const call = body.match(/grantViewer\(\{[\s\S]*?\}\)/);
+    expect(call, 'grantViewer(...)').not.toBeNull();
+    expect(call[0]).not.toMatch(/label/);
+  });
+
+  // Important 9: a fresh key fails every one of his refreshes with no way
+  // for him to tell "revoked" apart from "re-keyed" — the only warning he
+  // gets is this confirm, naming what has to happen next.
+  it('warns before re-keying that he must be re-paired in person', () => {
+    const body = functionBody(app(), 'rekeyShare');
+    expect(body, 'rekeyShare').not.toBeNull();
+    expect(body).toMatch(/confirm\(/);
+    expect(body).toMatch(/re-paired|in person/i);
+  });
+
+  // Important 10: schedulePush now awaits a vault write before arming its
+  // timer, so a rejection from that write can reach a caller that invokes
+  // it bare — the same unhandled-rejection shape Task 5 already fixed
+  // elsewhere, here in the one place that fix did not reach.
+  it('catches a rejection at every bare invocation of schedulePush or pushShare', () => {
+    const text = app();
+    expect(text).toMatch(/schedulePush\(\)\.catch\(\(\) => \{\}\);/);
+    expect(text).toMatch(/pushShare\(\)\.catch\(\(\) => \{\}\);/);
+  });
+
+  // Critical 3: the card must read "not yet sent" from the instant a save
+  // schedules a push, not only once the debounce timer actually fires —
+  // and a push interrupted by a lock (returnToLock clears the timer; iOS
+  // can lock within the 5s debounce window) must get another chance, which
+  // only the next paint() can give it.
+  it('schedulePush persists a pending result before arming the debounce timer', () => {
+    const body = functionBody(app(), 'schedulePush');
+    expect(body, 'schedulePush').not.toBeNull();
+    const pending = body.indexOf("status: 'pending'");
+    const timer = body.indexOf('setTimeout(');
+    expect(pending, "status: 'pending'").toBeGreaterThan(-1);
+    expect(timer, 'setTimeout(').toBeGreaterThan(pending);
+  });
+
+  it('retries an interrupted push on the next unlock', () => {
+    const body = functionBody(app(), 'paint');
+    expect(body, 'paint').not.toBeNull();
+    expect(body).toMatch(/lastPush\.status !== 'ok'/);
+    expect(body).toMatch(/schedulePush\(\)/);
+  });
 });
 
 describe('the viewer mode', () => {
@@ -1061,5 +1127,30 @@ describe('the viewer mode', () => {
     expect(body).toMatch(/if \(el\('viewer-refresh'\)\.disabled\) return;/);
     expect(body).toMatch(/el\('viewer-refresh'\)\.disabled = true;/);
     expect(body).toMatch(/finally\s*\{[\s\S]*el\('viewer-refresh'\)\.disabled = false;[\s\S]*\}/);
+  });
+
+  // Important 6: create() already offers Face ID on the owner's device
+  // (spec §7.4 step 5, Review Focus 5); createViewer never did, leaving his
+  // vault passphrase-only forever.
+  it('offers Face ID on his device too, the same as the owner gets', () => {
+    expect(functionBody(app(), 'createViewer')).toMatch(/offerFaceId\(\)/);
+  });
+
+  // Important 9: rekeyShare strands him with no recovery but setting the
+  // vault up a second time (which would cost him his own passphrase for
+  // nothing of hers). This control rewrites just the key, in place, under
+  // his existing passphrase.
+  it('offers a control to re-enter her key without setting the vault up again', () => {
+    expect(html()).toContain('id="viewer-rekey-input"');
+    expect(html()).toContain('id="viewer-rekey"');
+    const body = functionBody(app(), 'rekeyViewer');
+    expect(body, 'rekeyViewer').not.toBeNull();
+    expect(body).toMatch(/importSyncKey\(/);
+    expect(body).toMatch(/vault\.save\(/);
+    expect(body).not.toMatch(/vault\.setup\(/); // in place, not a fresh vault
+  });
+
+  it('clears a typed replacement key on lock, the same as the first-pairing input', () => {
+    expect(functionBody(app(), 'returnToLock')).toMatch(/viewer-rekey-input/);
   });
 });

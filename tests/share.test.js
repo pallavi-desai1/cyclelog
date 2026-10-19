@@ -206,18 +206,36 @@ describe('buildPayload', () => {
   it('seals the projection, not the document', async () => {
     const payload = await buildPayload(doc(), { ...sharing, updatedAt: '2015-03-26' });
     const plaintext = await openPayload(await importSyncKey(sharing.key), payload);
-    const projected = JSON.parse(plaintext);
-    expect(projected.spans).toHaveLength(1);
-    expect(projected.days).toEqual({});          // the dates scope carries none
+    const sealed = JSON.parse(plaintext);
+    expect(sealed.document.spans).toHaveLength(1);
+    expect(sealed.document.days).toEqual({});          // the dates scope carries none
   });
 
-  it('carries the metadata the viewer and the rules need', async () => {
+  it('carries the metadata the viewer and the rules need, both outside the seal (for indexing) and inside it', async () => {
     const payload = await buildPayload(doc(), { ...sharing, updatedAt: '2015-03-26' });
     expect(payload.scope).toBe('dates');
     expect(payload.updatedAt).toBe('2015-03-26');
     expect(payload.schemaVersion).toBe(SHARE_SCHEMA_VERSION);
     expect(Object.keys(payload).sort())
       .toEqual(['ciphertext', 'iv', 'schemaVersion', 'scope', 'updatedAt']);
+
+    const plaintext = await openPayload(await importSyncKey(sharing.key), payload);
+    const sealed = JSON.parse(plaintext);
+    expect(sealed.scope).toBe('dates');
+    expect(sealed.updatedAt).toBe('2015-03-26');
+  });
+
+  // Important 7: the host holds only the unencrypted copy of scope and
+  // updatedAt, and could relabel or replay them without the key. The viewer
+  // must trust what came out of the AEAD, not those outer fields — proven
+  // here by forging the outer fields and showing the sealed ones survive.
+  it('the outer scope and updatedAt are not what a viewer can trust — only the sealed copy is authenticated', async () => {
+    const payload = await buildPayload(doc(), { ...sharing, updatedAt: '2015-03-26' });
+    const forged = { ...payload, scope: 'everything', updatedAt: '2016-01-01' };
+    const plaintext = await openPayload(await importSyncKey(sharing.key), forged);
+    const sealed = JSON.parse(plaintext);
+    expect(sealed.scope).toBe('dates');
+    expect(sealed.updatedAt).toBe('2015-03-26');
   });
 
   // Review Focus 1, at the last point it could go wrong.

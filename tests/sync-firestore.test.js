@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   SyncError, signInAnonymously, refreshIdToken,
-  putVault, getVault, grantViewer, revokeViewer, listViewers,
+  putVault, getVault, grantViewer, revokeViewer, deleteVault,
 } from '../src/sync/firestore.js';
 
 // A stub transport. Every test drives the network by hand, which is the only
@@ -272,30 +272,26 @@ describe('viewer grants', () => {
     const { fetchImpl } = stubFetch([{ status: 404, json: {} }]);
     await expect(revokeViewer({ ...PROJECT, viewerUid: 'gone', fetchImpl })).resolves.toBeUndefined();
   });
+});
 
-  it('lists the viewers with their labels', async () => {
-    const { fetchImpl } = stubFetch([ok({
-      documents: [
-        { name: 'projects/p/databases/(default)/documents/vaults/owner-uid/viewers/viewer-one', fields: { label: { stringValue: 'partner' }, grantedAt: { stringValue: '2015-03-26' } } },
-      ],
-    })]);
-    expect(await listViewers({ ...PROJECT, fetchImpl })).toEqual([
-      { uid: 'viewer-one', label: 'partner', grantedAt: '2015-03-26' },
-    ]);
+// Important 5: without this, "Stop sharing" orphans the ciphertext on
+// Google's servers forever — the refresh token is about to be dropped from
+// the document, which is what would also make the document undeletable.
+describe('deleteVault', () => {
+  it('deletes the owner document at the path the rules check', async () => {
+    const { fetchImpl, calls } = stubFetch([ok({})]);
+    await deleteVault({ ...PROJECT, fetchImpl });
+    expect(calls[0].method).toBe('DELETE');
+    expect(calls[0].url).toContain('/databases/(default)/documents/vaults/owner-uid');
   });
 
-  it('returns an empty list when nobody is granted', async () => {
-    const { fetchImpl } = stubFetch([ok({})]);
-    expect(await listViewers({ ...PROJECT, fetchImpl })).toEqual([]);
+  it('treats a vault that is already gone as done', async () => {
+    const { fetchImpl } = stubFetch([{ status: 404, json: {} }]);
+    await expect(deleteVault({ ...PROJECT, fetchImpl })).resolves.toBeUndefined();
   });
 
-  // Review fix: a document with no name must not throw a raw TypeError —
-  // every failure here has to arrive as a typed SyncError.
-  it('reports a malformed viewer document as a typed error rather than throwing raw', async () => {
-    const { fetchImpl } = stubFetch([ok({
-      documents: [{ fields: { label: { stringValue: 'partner' }, grantedAt: { stringValue: '2015-03-26' } } } ],
-    })]);
-    await expect(listViewers({ ...PROJECT, fetchImpl }))
-      .rejects.toMatchObject({ name: 'SyncError', kind: 'server' });
+  it('reports a refusal as denied rather than swallowing it', async () => {
+    const { fetchImpl } = stubFetch([{ status: 403, json: { error: { message: 'denied' } } }]);
+    await expect(deleteVault({ ...PROJECT, fetchImpl })).rejects.toMatchObject({ kind: 'denied' });
   });
 });
