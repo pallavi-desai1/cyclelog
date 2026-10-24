@@ -167,8 +167,31 @@ describe('renderViewerHeader', () => {
       .toMatch(/read-only|view only/i);
   });
 
+  // The grant she makes names his sync id, and pairing a second time mints
+  // him a new one — so when a 403 says "the grant was removed", the first
+  // thing either of them needs is his CURRENT id. Showing it only once on
+  // the setup screen meant the one value needed to repair the grant was the
+  // one value no longer on screen, and re-pairing to see it again changed
+  // it. It belongs on this screen, permanently.
+  it('shows him his own sync id so a stale grant can be repaired', () => {
+    const html = renderViewerHeader({
+      scope: 'dates', updatedAt: '2015-03-26', label: 'her', uid: 'VIEWERUID123',
+    });
+    expect(html).toContain('VIEWERUID123');
+    expect(html).toMatch(/your sync id/i);
+  });
+
+  it('shows his sync id even before anything has been shared with him', () => {
+    const html = renderViewerHeader({
+      scope: null, updatedAt: null, label: '', uid: 'VIEWERUID123',
+    });
+    expect(html).toContain('VIEWERUID123');
+  });
+
   it('prints no null, undefined or NaN when nothing has arrived yet', () => {
     expect(renderViewerHeader({ scope: null, updatedAt: null, label: '' }))
+      .not.toMatch(/null|undefined|NaN/);
+    expect(renderViewerHeader({ scope: null, updatedAt: null, label: '', uid: null }))
       .not.toMatch(/null|undefined|NaN/);
   });
 });

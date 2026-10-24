@@ -96,8 +96,8 @@ describe('app wiring', () => {
       'renderMonthPicker({ month: viewMonth, range: monthRange(openDoc, localToday()), })',
       'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
       "renderShareCard({ state, fingerprint: state.key === null ? '' : await fingerprint(state.key), ownerUid: state.identity === null ? null : state.identity.uid, })",
-      "renderViewerHeader({ scope: null, updatedAt: null, label: '' })",
-      "renderViewerHeader({ scope, updatedAt, label: 'her' }) + renderSummary(summary) + renderCalendar(grid)",
+      "renderViewerHeader({ scope: null, updatedAt: null, label: '', uid: viewerRecordData.identity.uid })",
+      "renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid }) + renderSummary(summary) + renderCalendar(grid)",
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
       expect(allowed).toContain(squash(expression));
@@ -1152,5 +1152,15 @@ describe('the viewer mode', () => {
 
   it('clears a typed replacement key on lock, the same as the first-pairing input', () => {
     expect(functionBody(app(), 'returnToLock')).toMatch(/viewer-rekey-input/);
+  });
+});
+describe('the refusal a stale grant produces', () => {
+  // A 403 here almost always means his sync id changed (pairing again mints
+  // a new one), not that she revoked him. The message must point at the
+  // value that fixes it, which is now on his screen.
+  it('tells him to read her his sync id rather than only that it was refused', () => {
+    const body = app();
+    expect(body).toMatch(/stopped sharing, or the grant was removed/);
+    expect(body).toMatch(/read her your sync id/i);
   });
 });

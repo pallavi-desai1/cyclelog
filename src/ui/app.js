@@ -827,7 +827,9 @@ async function refreshViewer() {
     }
     viewerShared = null;
     if (kind === 'denied') {
-      say('viewer-error', 'She has stopped sharing, or the grant was removed.');
+      say('viewer-error', 'She has stopped sharing, or the grant was removed. '
+        + 'If you paired again since she granted you, your sync id changed — '
+        + 'read her your sync id above so she can grant it again.');
     } else if (error && error.name === 'OperationError') {
       // AES-GCM's own failure name for a wrong key or a tampered payload —
       // never flattened into an empty calendar, which would read as "she
@@ -860,7 +862,7 @@ async function paintViewer() {
     await refreshViewer();
     if (viewerRecordData === null) return; // locked mid-refresh
     if (viewerShared === null) {
-      el('viewer').innerHTML = renderViewerHeader({ scope: null, updatedAt: null, label: '' });
+      el('viewer').innerHTML = renderViewerHeader({ scope: null, updatedAt: null, label: '', uid: viewerRecordData.identity.uid });
     } else {
       const { doc, scope, updatedAt } = viewerShared;
       const summary = buildSummary(doc, localToday());
@@ -868,7 +870,7 @@ async function paintViewer() {
         month: monthOf(localToday()), todayISO: localToday(),
         adaptedDate: summary.adapted.date, baselineDates: [],
       });
-      el('viewer').innerHTML = renderViewerHeader({ scope, updatedAt, label: 'her' })
+      el('viewer').innerHTML = renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid })
         + renderSummary(summary)
         + renderCalendar(grid);
     }
