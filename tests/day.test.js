@@ -150,6 +150,21 @@ describe('context for the day', () => {
     expect(on('2015-03-10').method).toEqual({ method: 'pill', startedOn: '2015-02-01' });
   });
 
+  // A shared copy under the narrowest scope carries episode dates with no
+  // method name at all (src/sync/scope.js EPISODE_FIELDS.dates). Returning
+  // the episode anyway rendered "Method: undefined since 2015-02-01" on the
+  // partner's screen — the same defect that was fixed in buildSummary, in
+  // the one other place an episode is read.
+  it('has no method when the episode carries dates but no method name', () => {
+    const doc = {
+      version: 1,
+      birthControl: [{ startedOn: '2015-02-01', endedOn: null, expectedEffect: 'regulate' }],
+      spans: [],
+      days: {},
+    };
+    expect(dayDetail(doc, '2015-03-10', { todayISO: '2015-03-26' }).method).toBeNull();
+  });
+
   it('has no method before the first episode', () => {
     expect(on('2015-01-02').method).toBeNull();
   });

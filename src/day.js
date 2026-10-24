@@ -64,7 +64,11 @@ export function dayDetail(doc, dateISO, {
     source: entry ? entry.source ?? null : null,
     isApproximate: entry ? entry.precision === 'approx' : false,
 
-    method: episode === null
+    // `episode.method === undefined` is the shape a shared copy has under
+    // the narrowest scope, which sends episode dates without the method's
+    // name (src/sync/scope.js EPISODE_FIELDS.dates). Without this guard the
+    // partner's day panel renders "Method: undefined since <date>".
+    method: episode === null || episode.method === undefined
       ? null
       : { method: episode.method, startedOn: episode.startedOn },
 

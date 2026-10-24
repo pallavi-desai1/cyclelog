@@ -187,7 +187,11 @@ export function renderCalendar(grid) {
 
 // The panel under the calendar: what this day was, where it sits in the
 // cycle, and only what was actually recorded on it.
-export function renderDay(detail) {
+// `canEdit` is false on the partner's screen. The button's handler needs
+// `selectedDate`, which only the owner's device sets, so rendering it there
+// produced a control that did nothing — a read-only view must not offer the
+// action at all rather than offer it and ignore the tap.
+export function renderDay(detail, { canEdit = true } = {}) {
   const parts = [`<section class="card day${detail.isToday ? ' day-today' : ''}">`];
   parts.push(`<h3>${escapeHtml(detail.label)}${detail.isToday ? ' — today' : ''}</h3>`);
 
@@ -228,7 +232,7 @@ export function renderDay(detail) {
     parts.push(`<p class="day-source">${provenance.join(', ')}</p>`);
   }
 
-  parts.push('<button id="edit-day" type="button">Edit this day</button>');
+  if (canEdit) parts.push('<button id="edit-day" type="button">Edit this day</button>');
   parts.push('</section>');
   return parts.join('');
 }

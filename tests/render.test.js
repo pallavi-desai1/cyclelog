@@ -459,3 +459,33 @@ describe('the month picker', () => {
     expect((narrow.match(/<option value="\d{4}"/g) ?? [])).toHaveLength(1);
   });
 });
+describe('renderDay on a read-only screen', () => {
+  const detail = {
+    label: '21 March 2015', isToday: false, isFuture: false,
+    cycleDay: 2, periodDay: 2, isPeriod: true,
+    hasEntry: true, logged: [{ label: 'Flow', value: 'heavy' }],
+    source: 'manual', isApproximate: false, method: null,
+    predicted: false, baseline: false,
+  };
+
+  // Review Focus 5 again, one layer lower: drawViewerDay never touches the
+  // editor, but renderDay emitted the Edit button itself — so the partner's
+  // pane showed a control whose handler requires `selectedDate`, state his
+  // device never sets. It did nothing when tapped, which is worse than
+  // absent: a read-only screen must not offer an action at all.
+  it('offers no edit button when editing is not allowed', () => {
+    const html = renderDay(detail, { canEdit: false });
+    expect(html).not.toContain('edit-day');
+    expect(html).not.toMatch(/Edit this day/i);
+  });
+
+  it('still shows the day itself', () => {
+    const html = renderDay(detail, { canEdit: false });
+    expect(html).toContain('21 March 2015');
+    expect(html).toContain('heavy');
+  });
+
+  it('keeps the button by default, so her own screen is unchanged', () => {
+    expect(renderDay(detail)).toContain('id="edit-day"');
+  });
+});

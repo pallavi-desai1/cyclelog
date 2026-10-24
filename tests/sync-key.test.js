@@ -125,7 +125,14 @@ describe('sealPayload and openPayload', () => {
   it('throws on tampered ciphertext', async () => {
     const key = await importSyncKey(generateSyncKey());
     const sealed = await sealPayload(key, PLAINTEXT);
-    const bent = { ...sealed, ciphertext: `A${sealed.ciphertext.slice(1)}` };
+    // Not a hardcoded 'A': when the ciphertext already began with 'A' this
+    // "tampered" payload was byte-identical to the original, so the decrypt
+    // succeeded and the test failed — once in every sixty-four runs, and on
+    // those runs it was asserting nothing at all.
+    const bent = {
+      ...sealed,
+      ciphertext: `${sealed.ciphertext[0] === 'A' ? 'B' : 'A'}${sealed.ciphertext.slice(1)}`,
+    };
     await expect(openPayload(key, bent)).rejects.toThrow();
   });
 

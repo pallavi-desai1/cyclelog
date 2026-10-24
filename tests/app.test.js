@@ -98,6 +98,7 @@ describe('app wiring', () => {
       "renderShareCard({ state, fingerprint: state.key === null ? '' : await fingerprint(state.key), ownerUid: state.identity === null ? null : state.identity.uid, })",
       "renderViewerHeader({ scope: null, updatedAt: null, label: '', uid: viewerRecordData.identity.uid })",
       "renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid }) + renderSummary(summary) + renderCalendar(grid)",
+      'renderDay(dayDetail(viewerShared.doc, viewerDate, { todayISO: localToday(), adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date, baselineDates: [], }), { canEdit: false })',
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
       expect(allowed).toContain(squash(expression));
@@ -200,11 +201,13 @@ describe('idle locking', () => {
     const helper = functionBody(text, 'returnToLock');
     const inHelper = (helper.match(/innerHTML = ''/g) || []).length;
     const everywhere = (text.match(/innerHTML = ''/g) || []).length;
-    expect(inHelper).toBe(5);             // the summary, the calendar, the day panel, the share card and his viewer pane
+    expect(inHelper).toBe(6);             // the summary, the calendar, the day panel, the share card, his viewer pane and his day panel
     expect(helper).toMatch(/closePicker\(\)/);   // the picker, through its own helper
-    // Those five are the only sites that clear rendered markup, so there is
+    // Those six are the only sites that clear rendered markup, so there is
     // exactly one place that can forget a pane.
-    expect(everywhere).toBe(inHelper + 1);
+    // +2, not +1: closePicker clears the month picker, and drawViewerDay
+    // clears his day pane when there is no shared copy or no day selected.
+    expect(everywhere).toBe(inHelper + 2);
   });
 });
 
@@ -1074,6 +1077,45 @@ describe('the viewer mode', () => {
     const body = functionBody(app(), 'paintViewer');
     expect(body, 'paintViewer').not.toBeNull();
     expect(body).not.toMatch(/renderEditor|applyDayEdit|openEditor/);
+  });
+
+  // She asked for this after using it: a calendar he cannot open is a
+  // calendar that answers only "did it start", never "what was that day
+  // like". Same renderers as her screen, no editor anywhere near them.
+  it('lets him open a day and see its detail', () => {
+    const body = functionBody(app(), 'drawViewerDay');
+    expect(body, 'drawViewerDay').not.toBeNull();
+    expect(body).toMatch(/renderDay\(/);
+    expect(body).toMatch(/dayDetail\(/);
+  });
+
+  it('builds his day detail from the shared copy, never from her document', () => {
+    const body = functionBody(app(), 'drawViewerDay');
+    expect(body).toMatch(/viewerShared/);
+    expect(body).not.toMatch(/openDoc/);
+  });
+
+  it('keeps his day panel read-only', () => {
+    const body = functionBody(app(), 'drawViewerDay');
+    expect(body).not.toMatch(/renderEditor|applyDayEdit|openEditor/);
+    // Not enough on its own: renderDay emits the Edit button itself, so the
+    // pane has to ask for it to be left out.
+    expect(body).toMatch(/canEdit: false/);
+  });
+
+  it('has a pane for his day detail, outside the one refresh replaces', () => {
+    expect(html()).toContain('id="viewer-day"');
+  });
+
+  it('wires his calendar taps to the day panel', () => {
+    expect(app()).toMatch(/viewer'\)\.addEventListener\('click'/);
+  });
+
+  it('clears his day panel when the shared copy goes away', () => {
+    // A stale day card under a header that now says "nothing received yet"
+    // would be the same lie the cache-clearing exists to prevent.
+    const body = functionBody(app(), 'drawViewerDay');
+    expect(body).toMatch(/viewerShared === null|viewerDate === null/);
   });
 
   it('renders her data with the same tested renderers', () => {

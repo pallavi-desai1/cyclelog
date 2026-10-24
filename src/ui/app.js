@@ -81,6 +81,7 @@ function returnToLock() {
   // the DOM this clears — never written anywhere his vault would persist it
   // past the lock.
   el('viewer').innerHTML = '';
+  el('viewer-day').innerHTML = '';
   say('viewer-error', '');
   // Static markup, not part of #viewer's innerHTML, so the clear above does
   // not reach it — a typed key left sitting here across a lock is the same
@@ -100,6 +101,8 @@ function returnToLock() {
   // data must not survive his lock either.
   viewerRecordData = null;
   viewerShared = null;
+  viewerDate = null;
+  viewerSummary = null;
   // The editing draft lives only in the DOM the lock screen is about to
   // replace, but the flag that says "a form is open" is state in this
   // module, and must not survive to the next unlock.
@@ -136,6 +139,11 @@ let selectedDate = null;
 // data lives in RAM for the length of his session, nowhere else.
 let viewerRecordData = null;
 let viewerShared = null;
+// Which day of her shared copy he has open, and the summary his calendar was
+// drawn from. Kept here rather than read back out of the DOM so the panel can
+// be redrawn after a refresh without re-deriving what he had selected.
+let viewerDate = null;
+let viewerSummary = null;
 
 // The date currently open in the editor, or null when the day panel is
 // showing its read-only view instead. Cleared by returnToLock, by a
@@ -851,6 +859,44 @@ async function refreshViewer() {
 // her data cannot survive a lock), which means nothing inside it can be a
 // persistent, individually-addressed node — only #viewer itself, and the
 // static controls outside it, survive from one paint to the next.
+// His day panel. Built from viewerShared — the decrypted copy of what she
+// actually sent — never from openDoc, which on his device is always null
+// anyway: reaching for it would be the bug that quietly makes this pane read
+// the wrong document if the two modes ever share a screen.
+//
+// Read-only by construction: renderDay is the same renderer her screen uses,
+// and nothing here imports or calls the editor.
+function drawViewerDay() {
+  if (viewerShared === null || viewerDate === null) {
+    el('viewer-day').innerHTML = '';
+    return;
+  }
+  // No ghost on his screen: the viewer calendar is drawn with baselineDates
+  // empty, so a day panel claiming a counterfactual would contradict the grid
+  // beside it.
+  el('viewer-day').innerHTML = renderDay(dayDetail(viewerShared.doc, viewerDate, {
+    todayISO: localToday(),
+    adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date,
+    baselineDates: [],
+  }), { canEdit: false });
+  markViewerSelected();
+}
+
+function markViewerSelected() {
+  if (viewerDate === null) return;
+  for (const cell of el('viewer').querySelectorAll('.cal-selected')) {
+    cell.classList.remove('cal-selected');
+  }
+  const cell = el('viewer').querySelector(`[data-date="${viewerDate}"]`);
+  if (cell !== null) cell.classList.add('cal-selected');
+}
+
+function selectViewerDay(date) {
+  if (viewerShared === null) return;
+  viewerDate = date;
+  drawViewerDay();
+}
+
 async function paintViewer() {
   // Two fast taps on a flaky connection would otherwise interleave, letting
   // a slower response's clear-and-message land after a faster one's
@@ -866,6 +912,7 @@ async function paintViewer() {
     } else {
       const { doc, scope, updatedAt } = viewerShared;
       const summary = buildSummary(doc, localToday());
+      viewerSummary = summary;
       const grid = monthGrid(doc, {
         month: monthOf(localToday()), todayISO: localToday(),
         adaptedDate: summary.adapted.date, baselineDates: [],
@@ -874,6 +921,10 @@ async function paintViewer() {
         + renderSummary(summary)
         + renderCalendar(grid);
     }
+    // After the pane is replaced: a refresh must not silently drop the day he
+    // had open, and must not leave a stale card under a header that now says
+    // nothing was received.
+    drawViewerDay();
     screen('viewer-screen');
   } finally {
     el('viewer-refresh').disabled = false;
@@ -1272,6 +1323,15 @@ el('share').addEventListener('change', event => {
   if (event.target.id === 'share-scope') changeShareScope();
 });
 el('viewer-create').addEventListener('click', () => { createViewer(); });
+// Tap a day on his calendar. Delegated on #viewer because refresh replaces
+// that pane's markup wholesale, so a listener bound to a cell would not
+// survive the first refresh.
+el('viewer').addEventListener('click', (event) => {
+  const cell = event.target.closest('[data-date]');
+  if (cell === null) return;
+  selectViewerDay(cell.dataset.date);
+});
+
 el('viewer-refresh').addEventListener('click', () => { paintViewer(); });
 el('viewer-rekey').addEventListener('click', () => { rekeyViewer(); });
 el('viewer-lock').addEventListener('click', () => {
