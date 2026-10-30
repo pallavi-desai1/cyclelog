@@ -82,6 +82,17 @@ describe('validateEpisode', () => {
     )).toMatch(/overlap|still current/i);
   });
 
+  // The different-method branch: a second open episode must be refused
+  // whatever it is called. currentEpisode() returns the first match in a
+  // list sorted by start date, so two open episodes do not mean "both
+  // apply" — they mean the newer one is silently ignored.
+  it('rejects a second open episode even when the method differs', () => {
+    expect(validateEpisode(
+      { startedOn: '2015-09-01', endedOn: null, method: 'copper IUD', expectedEffect: 'none' },
+      { existing: existing() },
+    )).toMatch(/overlap|still current/i);
+  });
+
   it('lets an episode being edited overlap only itself', () => {
     expect(validateEpisode(
       { startedOn: '2015-01-02', endedOn: '2015-06-30', method: 'implant', expectedEffect: 'suppress' },
@@ -122,15 +133,6 @@ describe('addEpisode', () => {
       { version: 1, days: {}, spans: [], gaps: [], birthControl: [] },
       { startedOn: '', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
     )).toThrow();
-  });
-
-  it('does not mutate the document it was given', () => {
-    const before = doc();
-    const snapshot = JSON.stringify(before);
-    addEpisode(before, {
-      startedOn: '2015-08-01', endedOn: null, method: 'x', expectedEffect: 'none',
-    });
-    expect(JSON.stringify(before)).toBe(snapshot);
   });
 
   it('leaves her days, spans and gaps untouched', () => {

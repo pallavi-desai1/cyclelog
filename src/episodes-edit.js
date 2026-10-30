@@ -25,13 +25,8 @@ function isRealDate(text) {
 
 // Two episodes overlap when each starts on or before the other ends. An open
 // episode (endedOn null) extends forever, so it overlaps everything after its
-// start. Two open-ended episodes with different methods can coexist (validation
-// layer prevents same-method conflicts).
+// start — which is why a second open episode is always a conflict.
 function overlaps(a, b) {
-  // Two open-ended episodes with different methods are allowed to coexist
-  if (a.endedOn === null && b.endedOn === null && a.method !== b.method) {
-    return false;
-  }
   const aEnd = a.endedOn ?? '9999-12-31';
   const bEnd = b.endedOn ?? '9999-12-31';
   return a.startedOn <= bEnd && b.startedOn <= aEnd;
@@ -55,7 +50,7 @@ export function validateEpisode(episode, { existing = [], ignoreIndex = null } =
     return 'It cannot end before it started.';
   }
 
-  const candidate = { startedOn, endedOn: endedOn === '' ? null : endedOn, method };
+  const candidate = { startedOn, endedOn: endedOn === '' ? null : endedOn };
   for (const [index, other] of existing.entries()) {
     if (index === ignoreIndex) continue;
     if (overlaps(candidate, other)) {
