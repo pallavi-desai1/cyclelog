@@ -84,8 +84,11 @@ export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOC
       try {
         key = await unwrapKey(passphraseKey, meta.wrapped.passphrase);
       } catch {
-        // The ONLY swallowed failure in this module, and only this one line:
-        // an unwrap that fails means the passphrase was wrong.
+        // One of exactly two swallowed failures in this module — the other is
+        // the identical unwrap in verifyPassphrase, which answers the same
+        // question without unlocking. Both swallow for the same reason: an
+        // unwrap that fails means the passphrase was wrong. Nothing else in
+        // this file may hide an error.
         return { ok: false, reason: 'wrong-passphrase' };
       }
       return adopt(key);
@@ -130,6 +133,7 @@ export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOC
         await unwrapKey(passphraseKey, meta.wrapped.passphrase);
         return true;
       } catch {
+        // The second of the two swallowed failures named in unlock() above.
         return false;
       }
     },
