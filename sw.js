@@ -42,6 +42,7 @@ const PRECACHE = [
   'src/ui/render.js',
   'src/ui/editor.js',
   'src/ui/share.js',
+  'src/ui/settings.js',
   'src/ui/viewer.js',
   'src/config.js',
   'src/today.js',
