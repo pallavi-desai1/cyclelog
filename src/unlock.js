@@ -112,8 +112,16 @@ export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOC
     async enrollWrapping(name, wrappingKey) {
       requireUnlocked();
       const meta = await requireMeta();
-      meta.wrapped[name] = await wrapKey(wrappingKey, dataKey);
-      await writeMeta(backend, meta);
+      // Same rule as changePassphrase below: wrap first, then write one new
+      // meta object. Assigning onto the object readMeta returned would land
+      // in storage ahead of the write on a backend that returns its stored
+      // object by reference, so a throw from the wrap left a half-change
+      // behind that no writeMeta had agreed to.
+      const wrapped = await wrapKey(wrappingKey, dataKey);
+      await writeMeta(backend, {
+        ...meta,
+        wrapped: { ...meta.wrapped, [name]: wrapped },
+      });
     },
 
     // Settings asks for the current passphrase before changing it. The vault
@@ -142,11 +150,22 @@ export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOC
       requireUnlocked();
       const meta = await requireMeta();
       const salt = randomBytes(SALT_BYTES);
+      // Derive and wrap before anything is assigned anywhere. A lock
+      // arriving mid-derive nulls dataKey and makes wrapKey throw; the old
+      // code had already put the new salt on the live meta object by then,
+      // so a backend that hands back its stored object by reference was
+      // left pairing a new salt with the old wrapped key - and neither
+      // passphrase opened the vault again. Nothing is mutated here: a new
+      // meta object is built and written in one go, so a throw anywhere
+      // above leaves the stored meta exactly as it was.
       const passphraseKey = await deriveKey(nextPassphrase, salt, KDF_ITERATIONS);
-      meta.salt = [...salt];
-      meta.iterations = KDF_ITERATIONS;
-      meta.wrapped.passphrase = await wrapKey(passphraseKey, dataKey);
-      await writeMeta(backend, meta);
+      const wrapped = await wrapKey(passphraseKey, dataKey);
+      await writeMeta(backend, {
+        ...meta,
+        salt: [...salt],
+        iterations: KDF_ITERATIONS,
+        wrapped: { ...meta.wrapped, passphrase: wrapped },
+      });
     },
 
     lock,

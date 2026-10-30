@@ -308,6 +308,29 @@ describe('changePassphrase', () => {
     vault.lock();
     await expect(vault.changePassphrase('new battery')).rejects.toThrow(/locked/);
   });
+
+  it('leaves the old passphrase working when a lock interrupts the change', async () => {
+    const vault = createVault({ backend: memoryBackend() });
+    await vault.setup('the original passphrase', '{"version":1}');
+    const changing = vault.changePassphrase('the new passphrase');
+    vault.lock();
+    await changing.catch(() => {});
+    // The change did not complete, so the vault must still be exactly as it
+    // was. The failure this pins is not "the new passphrase does not work"
+    // - it is BOTH failing, which is permanent loss of her history.
+    expect(await vault.unlock('the original passphrase')).toEqual({ ok: true });
+  });
+
+  it('never writes a salt that does not match the stored wrapped key', async () => {
+    const backend = memoryBackend();
+    const vault = createVault({ backend });
+    await vault.setup('the original passphrase', '{"version":1}');
+    const before = JSON.stringify(await readMeta(backend));
+    const changing = vault.changePassphrase('the new passphrase');
+    vault.lock();
+    await changing.catch(() => {});
+    expect(JSON.stringify(await readMeta(backend))).toBe(before);
+  });
 });
 
 describe('verifyPassphrase', () => {

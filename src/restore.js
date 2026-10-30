@@ -75,3 +75,13 @@ export async function requestPersistentStorage(navigatorLike = globalThis.naviga
     return false;
   }
 }
+
+// The word she must type before her whole log is destroyed. Exported with
+// its check so the rule is covered by tests that execute it - inside the UI
+// glue it could only be matched as source text, and a mutation that
+// accepted an empty answer kept the whole suite green.
+export const ERASE_WORD = 'ERASE';
+
+export function eraseConfirmed(answer) {
+  return answer === ERASE_WORD;
+}

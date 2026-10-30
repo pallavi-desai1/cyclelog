@@ -14,7 +14,7 @@ import {
 } from '../export.js';
 import {
   classifyRestoreFile, parseBackupBundle, restoreBackup,
-  markBackup, readLastBackup, requestPersistentStorage,
+  markBackup, readLastBackup, requestPersistentStorage, eraseConfirmed,
 } from '../restore.js';
 import {
   monthGrid, monthOf, shiftMonth, projectedDates, monthRange, clampMonth,
@@ -111,6 +111,11 @@ function returnToLock() {
   if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
   say('cal-label', '');
   say('import-notice', '');
+  // Holds describeImport output — counts derived from her document — so
+  // leaving it set survived both the lock and the erase, and the first
+  // visit to Settings after a fresh setup still described the history that
+  // was destroyed.
+  say('settings-import-notice', '');
   // The decrypted document must not outlive the lock (spec §8), and the
   // calendar is the one place it was being held outside the vault.
   openDoc = null;
@@ -1322,43 +1327,81 @@ function exportPlaintext(kind) {
 // must not let someone set a new passphrase and lock her out of her history.
 async function changePassphrase() {
   if (openDoc === null) return;
-  const current = el('passphrase-current').value;
-  const next = el('passphrase-next').value;
-  const confirm = el('passphrase-confirm').value;
-
-  say('passphrase-error', '');
-  say('passphrase-notice', '');
-  if (next.length < 8) return say('passphrase-error', 'Use at least 8 characters.');
-  if (next !== confirm) return say('passphrase-error', 'The two new passphrases differ.');
-
+  // Both security buttons are read-modify-write on meta. Two overlapping
+  // runs could lose the biometric wrapping, or leave the OLD passphrase
+  // working after this screen said "Changed." — the same guard every other
+  // async button here already has.
+  if (el('passphrase-change').disabled) return;
+  el('passphrase-change').disabled = true;
   try {
-    if (!await vault.verifyPassphrase(current)) {
-      return say('passphrase-error', 'That is not your current passphrase.');
-    }
-    await vault.changePassphrase(next);
-  } catch {
-    // Includes the vault locking underneath this screen, which throws.
-    return say('passphrase-error', 'That could not be changed. Unlock and try again.');
-  }
+    const current = el('passphrase-current').value;
+    const next = el('passphrase-next').value;
+    const confirm = el('passphrase-confirm').value;
 
-  clear('passphrase-current');
-  clear('passphrase-next');
-  clear('passphrase-confirm');
-  // Said explicitly because the data key did not change: Face ID still works,
-  // and her old backups still open with the OLD passphrase.
-  say('passphrase-notice', 'Changed. Face ID still works. Backup files you already '
-    + 'downloaded still need the old passphrase.');
+    say('passphrase-error', '');
+    say('passphrase-notice', '');
+    if (next.length < 8) return say('passphrase-error', 'Use at least 8 characters.');
+    if (next !== confirm) return say('passphrase-error', 'The two new passphrases differ.');
+
+    try {
+      if (!await vault.verifyPassphrase(current)) {
+        return say('passphrase-error', 'That is not your current passphrase.');
+      }
+      await vault.changePassphrase(next);
+    } catch {
+      // Includes the vault locking underneath this screen, which throws.
+      return say('passphrase-error', 'That could not be changed. Unlock and try again.');
+    }
+
+    clear('passphrase-current');
+    clear('passphrase-next');
+    clear('passphrase-confirm');
+    // Said explicitly because the data key did not change: her old backups
+    // still open with the OLD passphrase. The Face ID half is only said when
+    // there is a biometric wrapping to say it about — promising a fallback
+    // she never enrolled, on the screen where she has just replaced the only
+    // key to her history, is the worst place to be wrong.
+    const credentialId = await readCredentialId(backend).catch(() => null);
+    if (openDoc === null) return;
+    if (credentialId !== null) {
+      return say('passphrase-notice', 'Changed. Face ID still works. Backup files you '
+        + 'already downloaded still need the old passphrase.');
+    }
+    say('passphrase-notice', 'Changed. Backup files you already downloaded still need '
+      + 'the old passphrase.');
+  } finally {
+    el('passphrase-change').disabled = false;
+  }
 }
 
-// One enrolment path, shared with create() and createViewer(): offerFaceId
-// swallows every failure and returns early when the device cannot do it or
-// she declines, which is why this cannot promise more than it does.
+// One enrolment path, shared with create() and createViewer(). offerFaceId
+// still swallows every failure, but it now reports which one happened, so
+// this screen can say something true instead of one unfalsifiable sentence
+// that also appeared when the device cannot do Face ID at all.
 async function enrollFaceIdNow() {
   if (openDoc === null) return;
-  say('faceid-notice', '');
-  await offerFaceId();
-  if (openDoc === null) return;
-  say('faceid-notice', 'If your phone asked and you agreed, Face ID is set up.');
+  // See changePassphrase: both buttons write meta, and neither may run a
+  // second time over itself.
+  if (el('faceid-enroll').disabled) return;
+  el('faceid-enroll').disabled = true;
+  try {
+    say('faceid-notice', '');
+    const result = await offerFaceId();
+    if (openDoc === null) return;
+    if (result === 'enrolled') {
+      return say('faceid-notice', 'Face ID is set up. You can use it to unlock on this phone.');
+    }
+    if (result === 'unsupported') {
+      return say('faceid-notice', 'This phone cannot unlock with Face ID. Your passphrase '
+        + 'stays the way in.');
+    }
+    if (result === 'declined') {
+      return say('faceid-notice', 'Face ID was not set up. Nothing changed.');
+    }
+    say('faceid-notice', 'Face ID could not be set up. Nothing changed — try again.');
+  } finally {
+    el('faceid-enroll').disabled = false;
+  }
 }
 
 // Local erase is not enough: the uploaded ciphertext and the viewer grants
@@ -1376,7 +1419,23 @@ async function eraseEverything() {
     'This erases your whole log from this phone and cannot be undone. '
     + 'A backup file is the only way back. Type ERASE to confirm.',
   );
-  if (typed !== 'ERASE') return;
+  if (!eraseConfirmed(typed)) {
+    // A near-miss used to be indistinguishable from a cancel: both did
+    // nothing and said nothing. Cancel stays silent — she knows she
+    // cancelled — but a typed answer that was not the word gets an answer.
+    if (typed !== null) {
+      say('erase-error', 'Nothing was erased — type ERASE exactly to confirm.');
+    }
+    return;
+  }
+  // A push armed by her last save fires five seconds later, and its putVault
+  // would land after deleteVault — recreating the uploaded ciphertext under
+  // a uid whose refresh token the erase below is about to destroy, orphaning
+  // it on Google's servers forever. returnToLock clears the timer, but only
+  // two awaits after the teardown. The same shape locally: an in-flight
+  // vault.save can rewrite the blob eraseAll just deleted.
+  if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
+  await pendingSave?.catch(() => {});
 
   try {
     if (shareState(openDoc).key !== null) {
@@ -1392,6 +1451,16 @@ async function eraseEverything() {
     }
     await vault.erase();
   } catch {
+    // The two deletes are not atomic, and the first one removes the wrapped
+    // key. If it landed, her log is already unreadable and saying otherwise
+    // is the one thing this screen must not do.
+    const state = await vault.status().catch(() => 'locked');
+    if (state === 'empty') {
+      hasVault = false;
+      return say('erase-error', 'The erase did not finish cleanly, but your log '
+        + 'can no longer be opened on this phone. Restore from a backup file if '
+        + 'you did not mean to do this.');
+    }
     return say('erase-error', 'That did not finish. Nothing was erased — try again.');
   }
   hasVault = false;
@@ -1589,7 +1658,7 @@ async function faceIdUnlock() {
 // and swallowed on the spot.
 async function offerFaceId() {
   try {
-    if (!biometricSupported()) return;
+    if (!biometricSupported()) return 'unsupported';
     const enrolled = await enrollBiometric({
       credentials: navigator.credentials,
       rpId: window.location.hostname,
@@ -1598,17 +1667,27 @@ async function offerFaceId() {
     });
     // A device without PRF, or a declined prompt, leaves the passphrase as
     // the only way in — the designed fallback, not an error worth showing.
-    if (!enrolled.ok) return;
-    await rememberCredentialId(backend, enrolled.credentialId);
+    if (!enrolled.ok) return 'declined';
+    // The wrapping first, the credential id second. Both writes touch meta
+    // and the pair has to agree, and the write that can realistically fail
+    // is this one: enrollWrapping calls requireUnlocked(), so a lock during
+    // the two-prompt ceremony throws here. Writing the id first stored a new
+    // credential against the old wrapping and broke a Face ID that had been
+    // working; this way the same throw leaves the old, working pair intact.
     await vault.enrollWrapping('biometric', enrolled.key);
+    await rememberCredentialId(backend, enrolled.credentialId);
     // Enrolment just succeeded without a reload, so the lock screen (reached
     // later via lock-now, idle or page-hide) needs its Face ID button shown
     // now rather than only on the next cold start().
     show('faceid');
+    return 'enrolled';
   } catch {
-    // Silent on purpose: Face ID is an enhancement, and failing here must
-    // leave the vault setup it followed looking exactly as successful as it
-    // actually was.
+    // Still silent on purpose: Face ID is an enhancement, and failing here
+    // must leave the vault setup it followed looking exactly as successful
+    // as it actually was. The outcome is returned rather than shown, so
+    // Settings can say something true without create() or createViewer()
+    // changing behaviour at all — both ignore it.
+    return 'failed';
   }
 }
 

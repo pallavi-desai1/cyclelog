@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   BACKUP_KIND, classifyRestoreFile, parseBackupBundle, restoreBackup,
   markBackup, readLastBackup, requestPersistentStorage,
+  ERASE_WORD, eraseConfirmed,
 } from '../src/restore.js';
 import { backupBundle, documentJson } from '../src/export.js';
 import { memoryBackend, readMeta, VAULT_KEY } from '../src/store.js';
@@ -215,5 +216,41 @@ describe('requestPersistentStorage', () => {
   it('reports false rather than throwing when the call itself fails', async () => {
     const navigatorLike = { storage: { persisted: async () => false, persist: async () => { throw new Error('denied'); } } };
     expect(await requestPersistentStorage(navigatorLike)).toBe(false);
+  });
+});
+
+// The one irreversible action in the app. Its rule used to live inside the
+// Settings glue, where a test could only match it as source text inside a
+// function called eraseEverything - and a mutation that accepted an empty
+// answer kept the whole suite green. These execute it.
+describe('the erase confirmation', () => {
+  it('accepts the exact word', () => {
+    expect(eraseConfirmed(ERASE_WORD)).toBe(true);
+    expect(eraseConfirmed('ERASE')).toBe(true);
+  });
+
+  it('refuses the word in lower case', () => {
+    expect(eraseConfirmed('erase')).toBe(false);
+    expect(eraseConfirmed('Erase')).toBe(false);
+  });
+
+  it('refuses the word with spaces around it', () => {
+    expect(eraseConfirmed(' ERASE ')).toBe(false);
+    expect(eraseConfirmed(' ERASE')).toBe(false);
+    expect(eraseConfirmed('ERASE ')).toBe(false);
+  });
+
+  // The mutation the old test could not see: pressing OK on an empty prompt
+  // must not destroy her whole log.
+  it('refuses an empty answer', () => {
+    expect(eraseConfirmed('')).toBe(false);
+  });
+
+  it('refuses a cancelled prompt', () => {
+    expect(eraseConfirmed(null)).toBe(false);
+  });
+
+  it('refuses a prompt that was never answered at all', () => {
+    expect(eraseConfirmed(undefined)).toBe(false);
   });
 });

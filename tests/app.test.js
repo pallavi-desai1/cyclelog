@@ -150,10 +150,21 @@ describe('app wiring', () => {
     expect(app()).toContain('readCredentialId(');
   });
 
-  it('remembers the credential before enrolling the wrapping', () => {
-    // enrollWrapping re-reads the meta, so the reverse order drops it.
+  it('enrolls the wrapping before remembering the credential', () => {
+    // This assertion used to run the other way round, on the stated grounds
+    // that "enrollWrapping re-reads the meta, so the reverse order drops
+    // it". That is not what the code does: both writes read the meta back
+    // and spread it, so on success either order preserves both fields
+    // (checked by driving the two orders against memoryBackend). What the
+    // order decides is which half-finished write she is left with, and the
+    // two are not equally bad. enrollWrapping calls requireUnlocked() and
+    // throws when a lock lands during the two-prompt Face ID ceremony,
+    // which is the failure that actually happens; writing the credential id
+    // first stored a new credential against the old wrapping, so a Face ID
+    // that had been working stopped. Wrapping first leaves that same throw
+    // with the old, working pair untouched.
     const text = app();
-    expect(text.indexOf('rememberCredentialId(')).toBeLessThan(text.indexOf('enrollWrapping('));
+    expect(text.indexOf('enrollWrapping(')).toBeLessThan(text.indexOf('rememberCredentialId('));
   });
 
   it('never writes the document or the passphrase to the console', () => {
@@ -1312,6 +1323,51 @@ describe('the settings screen', () => {
     const body = functionBody(app(), 'eraseEverything');
     expect(body).toMatch(/prompt\(/);
     expect(body).toMatch(/erase/i);
+    // The /erase/i above cannot fail inside a function called
+    // eraseEverything, so the rule itself lives in src/restore.js where
+    // tests can execute it (see "the erase confirmation" in
+    // tests/restore.test.js). This is the line that keeps the screen
+    // attached to the tested rule rather than to a copy of it.
+    expect(body).toMatch(/eraseConfirmed\(typed\)/);
+  });
+
+  // The recheck before the erase can only see the document. It cannot see a
+  // push already armed by her last save: PUSH_DEBOUNCE_MS later its putVault
+  // would land after the uploaded copy was deleted, recreating it under a uid
+  // whose refresh token the erase then destroys. returnToLock clears the
+  // timer, but only at the very end, two awaits past the teardown.
+  it('disarms a queued push and drains an in-flight save before the teardown', () => {
+    const body = functionBody(app(), 'eraseEverything');
+    const clearAt = body.indexOf('clearTimeout(pushTimer)');
+    const drainAt = body.indexOf('await pendingSave?.catch(');
+    const stopAt = body.indexOf('stopSharing(');
+    const eraseAt = body.indexOf('vault.erase(');
+    expect(clearAt, 'clearTimeout(pushTimer)').toBeGreaterThan(-1);
+    expect(drainAt, 'await pendingSave').toBeGreaterThan(-1);
+    expect(eraseAt).toBeGreaterThan(clearAt);
+    expect(eraseAt).toBeGreaterThan(drainAt);
+    // Before the teardown, not merely before the erase: deleteVault runs
+    // inside stopSharing, so a push landing after it is the orphan this
+    // whole ordering exists to prevent.
+    expect(stopAt).toBeGreaterThan(clearAt);
+    expect(stopAt).toBeGreaterThan(drainAt);
+  });
+
+  // eraseAll deletes the meta first and the blob second, and the first delete
+  // takes the wrapped key with it. A failure between them leaves her history
+  // already unreadable, which is the one case where "Nothing was erased" is
+  // the worst possible thing to put on the screen.
+  it('tells her the truth when the erase failed after the key was already gone', () => {
+    const body = functionBody(app(), 'eraseEverything');
+    const catchBlock = balancedBlockAfter(body, '} catch');
+    expect(catchBlock, 'catch block').not.toBeNull();
+    // Asked, not assumed: the message is chosen from what the vault reports.
+    expect(catchBlock).toMatch(/vault\.status\(\)/);
+    expect(catchBlock).toMatch(/=== 'empty'/);
+    expect(catchBlock).toMatch(/can no longer be opened/);
+    expect(catchBlock).toMatch(/Nothing was erased/);
+    // An unreadable vault must not leave the screen believing it has one.
+    expect(catchBlock).toMatch(/hasVault = false/);
   });
 
   it('names what erase destroys, including that a backup is the only way back', () => {
@@ -1320,13 +1376,54 @@ describe('the settings screen', () => {
   });
 
   // Review Focus 4: both actions sit on a screen an idle lock can replace
-  // underneath them, and the vault throws when locked.
-  it('survives the vault being locked underneath either action', () => {
+  // underneath them, and the vault throws when locked. This used to assert
+  // /try\s*{/ and /catch/ over the body, which a comment satisfies: dropping
+  // the `return` from changePassphrase's catch — so a failed change cleared
+  // the three fields and announced "Changed." — kept the suite green. What
+  // matters is not that a catch exists but that it stops.
+  it('stops rather than falling through when the vault locks underneath either action', () => {
     for (const name of ['changePassphrase', 'eraseEverything']) {
       const body = functionBody(app(), name);
-      expect(body, name).toMatch(/try\s*{/);
-      expect(body, name).toMatch(/catch/);
+      expect(body, name).not.toBeNull();
+      const catchBlock = balancedBlockAfter(body, '} catch');
+      expect(catchBlock, name).not.toBeNull();
+      // Comments stripped, so prose about returning cannot stand in for a
+      // return — the exact substitution that made the old assertion vacuous.
+      const code = catchBlock.replace(/\/\/[^\n]*/g, '');
+      expect(code, name).toMatch(/\breturn\b/);
     }
+  });
+
+  // Both handlers are read-modify-write on the same meta record, and neither
+  // button was disabled while its async work ran. Overlapping runs could lose
+  // the biometric wrapping, or leave the OLD passphrase working after the
+  // screen said "Changed." — the guard every other async button here has.
+  it('refuses a second tap while the first is still running', () => {
+    for (const [name, id] of [['changePassphrase', 'passphrase-change'], ['enrollFaceIdNow', 'faceid-enroll']]) {
+      const body = functionBody(app(), name);
+      expect(body, name).not.toBeNull();
+      expect(body, name).toContain(`if (el('${id}').disabled) return;`);
+      expect(body, name).toContain(`el('${id}').disabled = true;`);
+      // Restored in a finally, or one failure disables the button for good.
+      const finallyBlock = balancedBlockAfter(body, '} finally');
+      expect(finallyBlock, name).not.toBeNull();
+      expect(finallyBlock, name).toContain(`el('${id}').disabled = false;`);
+    }
+  });
+
+  // True when she has Face ID enrolled, and verified so. But the notice never
+  // asked, so a user who never enrolled was promised a biometric fallback she
+  // does not have — on the one screen where she has just replaced the only key
+  // to her history. The backup half of the sentence is true either way.
+  it('only promises Face ID still works when there is a wrapping to say it about', () => {
+    const body = functionBody(app(), 'changePassphrase');
+    expect(body).toMatch(/readCredentialId\(backend\)/);
+    const promise = body.indexOf('Face ID still works');
+    expect(promise).toBeGreaterThan(-1);
+    expect(body.indexOf('readCredentialId(backend)')).toBeLessThan(promise);
+    expect(body).toMatch(/credentialId !== null/);
+    // And the other branch still carries the claim that is true regardless.
+    expect((body.match(/old passphrase/g) || []).length).toBe(2);
   });
 
   it('clears a typed passphrase on lock, like every other plaintext input', () => {
@@ -1334,6 +1431,15 @@ describe('the settings screen', () => {
     expect(helper).toMatch(/clear\('passphrase-current'\)/);
     expect(helper).toMatch(/clear\('passphrase-next'\)/);
     expect(helper).toMatch(/clear\('passphrase-confirm'\)/);
+  });
+
+  // It holds describeImport output, which is derived from her document, and
+  // it was cleared by neither the lock nor drawSettings — so the first visit
+  // to Settings after Erase and a fresh setup still described the history
+  // that had just been destroyed.
+  it('clears the import notice on lock, so no trace of the document survives it', () => {
+    const helper = functionBody(app(), 'returnToLock');
+    expect(helper).toMatch(/say\('settings-import-notice', ''\)/);
   });
 });
 
