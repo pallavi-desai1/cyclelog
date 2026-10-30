@@ -310,6 +310,65 @@ describe('changePassphrase', () => {
   });
 });
 
+describe('verifyPassphrase', () => {
+  it('is true for the passphrase that opens the vault', async () => {
+    const vault = createVault({ backend: memoryBackend() });
+    await vault.setup('correct horse battery', '{"version":1}');
+    expect(await vault.verifyPassphrase('correct horse battery')).toBe(true);
+  });
+
+  it('is false for any other passphrase', async () => {
+    const vault = createVault({ backend: memoryBackend() });
+    await vault.setup('correct horse battery', '{"version":1}');
+    expect(await vault.verifyPassphrase('wrong horse battery')).toBe(false);
+  });
+
+  it('leaves the vault unlocked and its document readable either way', async () => {
+    const vault = createVault({ backend: memoryBackend() });
+    await vault.setup('correct horse battery', '{"version":1}');
+    await vault.verifyPassphrase('wrong horse battery');
+    expect(await vault.status()).toBe('unlocked');
+    expect(vault.read()).toBe('{"version":1}');
+  });
+
+  it('refuses when the vault is locked rather than reporting false', async () => {
+    const vault = createVault({ backend: memoryBackend() });
+    await vault.setup('correct horse battery', '{"version":1}');
+    vault.lock();
+    await expect(vault.verifyPassphrase('correct horse battery')).rejects.toThrow(/locked/);
+  });
+});
+
+// Review Focus 1: the data key is what Face ID's wrapping wraps. A passphrase
+// change re-wraps that same key, so Face ID must keep working. An
+// implementation that regenerated the data key would pass every
+// passphrase-change test and silently destroy the Face ID path.
+describe('changePassphrase and Face ID together', () => {
+  it('leaves an enrolled Face ID wrapping able to unlock', async () => {
+    const backend = memoryBackend();
+    const vault = createVault({ backend });
+    await vault.setup('first passphrase', '{"version":1}');
+
+    const faceKey = await generateKey();
+    await vault.enrollWrapping('faceid', faceKey);
+    await vault.changePassphrase('second passphrase');
+    vault.lock();
+
+    expect(await vault.unlockWithKey('faceid', faceKey)).toEqual({ ok: true });
+    expect(vault.read()).toBe('{"version":1}');
+  });
+
+  it('still opens with the new passphrase and not the old one', async () => {
+    const vault = createVault({ backend: memoryBackend() });
+    await vault.setup('first passphrase', '{"version":1}');
+    await vault.changePassphrase('second passphrase');
+    vault.lock();
+
+    expect(await vault.unlock('first passphrase')).toEqual({ ok: false, reason: 'wrong-passphrase' });
+    expect(await vault.unlock('second passphrase')).toEqual({ ok: true });
+  });
+});
+
 describe('erase', () => {
   it('returns the vault to empty and locks it', async () => {
     const { vault } = fresh();

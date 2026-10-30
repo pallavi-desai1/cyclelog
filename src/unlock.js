@@ -113,6 +113,27 @@ export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOC
       await writeMeta(backend, meta);
     },
 
+    // Settings asks for the current passphrase before changing it. The vault
+    // itself does not need that proof — it is unlocked, so the caller already
+    // has it — but the screen does: an unlocked phone on a table must not let
+    // someone set a new passphrase and lock her out of her own history.
+    //
+    // Deliberately does not touch lastTouch: checking a passphrase is not
+    // activity on her data, and must not extend the idle lock.
+    async verifyPassphrase(passphrase) {
+      requireUnlocked();
+      const meta = await requireMeta();
+      const passphraseKey = await deriveKey(
+        passphrase, new Uint8Array(meta.salt), meta.iterations,
+      );
+      try {
+        await unwrapKey(passphraseKey, meta.wrapped.passphrase);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
     async changePassphrase(nextPassphrase) {
       requireUnlocked();
       const meta = await requireMeta();
