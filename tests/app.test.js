@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 // src/ui/app.js touches `navigator` and `document` at module scope, so it is
 // read as text rather than imported. These assertions pin the wiring that the
@@ -1385,20 +1386,25 @@ describe('the refusal a stale grant produces', () => {
 // introduced during a fix round would have shipped green. `node --check`
 // parses without executing, which is exactly what is needed here.
 describe('every module is valid JavaScript', () => {
-  const modules = [
-    'src/ui/app.js',
-    ...readdirSync(new URL('../src', import.meta.url)).filter(f => f.endsWith('.js')).map(f => `src/${f}`),
-    ...readdirSync(new URL('../src/ui', import.meta.url)).filter(f => f.endsWith('.js')).map(f => `src/ui/${f}`),
-    ...readdirSync(new URL('../src/sync', import.meta.url)).filter(f => f.endsWith('.js')).map(f => `src/sync/${f}`),
-  ];
+  // Walked rather than listed: a directory added later (src/importers was
+  // missed by the first version of this test, which named three directories
+  // and called itself "every module") must be covered without anyone
+  // remembering to come back here.
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return walk(full);
+    return entry.name.endsWith('.js') ? [full] : [];
+  });
+  const modules = walk(join(root, 'src'));
 
   it('parses, including the one no test can import', () => {
-    expect(modules).toContain('src/ui/app.js');
+    expect(modules.some(f => f.endsWith(`${sep}ui${sep}app.js`))).toBe(true);
+    expect(modules.some(f => f.includes(`${sep}importers${sep}`))).toBe(true);
     for (const file of modules) {
-      const result = spawnSync(process.execPath, ['--check', file], {
-        cwd: new URL('..', import.meta.url).pathname,
-        encoding: 'utf8',
-      });
+      // fileURLToPath, not URL.pathname: a repo checked out under a path
+      // with a space would otherwise arrive percent-encoded.
+      const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
       expect(result.status, `${file}: ${result.stderr}`).toBe(0);
     }
   });
