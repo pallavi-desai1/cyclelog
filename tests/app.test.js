@@ -1241,6 +1241,100 @@ describe('the settings screen', () => {
     const screenAt = body.indexOf("screen('settings')");
     expect(screenAt).toBeGreaterThan(paintAt);
   });
+
+  it('offers a passphrase change, Face ID and erase', () => {
+    const text = html();
+    expect(text).toContain('id="passphrase-current"');
+    expect(text).toContain('id="passphrase-next"');
+    expect(text).toContain('id="passphrase-confirm"');
+    expect(text).toContain('id="passphrase-change"');
+    expect(text).toContain('id="faceid-enroll"');
+    expect(text).toContain('id="erase-all"');
+  });
+
+  it('checks the current passphrase before re-wrapping', () => {
+    const body = functionBody(app(), 'changePassphrase');
+    expect(body, 'changePassphrase').not.toBeNull();
+    expect(body).toMatch(/verifyPassphrase\(/);
+    const verifyAt = body.indexOf('verifyPassphrase(');
+    const changeAt = body.indexOf('vault.changePassphrase(');
+    expect(verifyAt).toBeGreaterThan(-1);
+    expect(changeAt).toBeGreaterThan(verifyAt);
+  });
+
+  it('requires the new passphrase twice and checks its length', () => {
+    const body = functionBody(app(), 'changePassphrase');
+    expect(body).toMatch(/passphrase-confirm/);
+    expect(body).toMatch(/length < 8|length >= 8/);
+  });
+
+  it('reuses the one Face ID enrolment path rather than a second copy', () => {
+    const body = app();
+    expect((body.match(/async function offerFaceId/g) || []).length).toBe(1);
+    expect(functionBody(body, 'enrollFaceIdNow')).toMatch(/offerFaceId\(/);
+  });
+
+  // Review Focus 2: vault.erase() clears local storage only. Erasing while
+  // sharing is on would strand the uploaded ciphertext and the viewer grants
+  // on Google's servers forever, because the key that manages them is in the
+  // vault being destroyed.
+  it('stops sharing before erasing, so no ciphertext is orphaned', () => {
+    const body = functionBody(app(), 'eraseEverything');
+    expect(body, 'eraseEverything').not.toBeNull();
+    const stopAt = body.search(/stopSharing\(|revokeViewer\(|deleteVault\(/);
+    const eraseAt = body.indexOf('vault.erase(');
+    expect(stopAt).toBeGreaterThan(-1);
+    expect(eraseAt).toBeGreaterThan(stopAt);
+  });
+
+  // Ordering alone is not enough: stopSharing swallows its own failures and
+  // asks for its own confirmation, either of which would return normally
+  // with sharing still on and let the erase below orphan the ciphertext
+  // anyway. The erase path must re-check the document rather than assume.
+  it('refuses to erase if the teardown left sharing on', () => {
+    const body = functionBody(app(), 'eraseEverything');
+    const stopAt = body.indexOf('stopSharing(');
+    const eraseAt = body.indexOf('vault.erase(');
+    const recheck = body.slice(stopAt, eraseAt);
+    expect(recheck).toMatch(/shareState\(openDoc\)\.key !== null/);
+    expect(recheck).toMatch(/openDoc === null/);
+  });
+
+  // A silent teardown that still swallowed its errors would report success
+  // to the erase path; it has to rethrow so the erase is abandoned.
+  it('lets a silent teardown failure reach its caller rather than swallowing it', () => {
+    const body = functionBody(app(), 'stopSharing');
+    const catchBlock = body.slice(body.indexOf('} catch'));
+    expect(catchBlock).toMatch(/if \(silent\) throw/);
+  });
+
+  it('makes her type the word rather than tapping once', () => {
+    const body = functionBody(app(), 'eraseEverything');
+    expect(body).toMatch(/prompt\(/);
+    expect(body).toMatch(/erase/i);
+  });
+
+  it('names what erase destroys, including that a backup is the only way back', () => {
+    const body = functionBody(app(), 'eraseEverything');
+    expect(body).toMatch(/backup/i);
+  });
+
+  // Review Focus 4: both actions sit on a screen an idle lock can replace
+  // underneath them, and the vault throws when locked.
+  it('survives the vault being locked underneath either action', () => {
+    for (const name of ['changePassphrase', 'eraseEverything']) {
+      const body = functionBody(app(), name);
+      expect(body, name).toMatch(/try\s*{/);
+      expect(body, name).toMatch(/catch/);
+    }
+  });
+
+  it('clears a typed passphrase on lock, like every other plaintext input', () => {
+    const helper = functionBody(app(), 'returnToLock');
+    expect(helper).toMatch(/clear\('passphrase-current'\)/);
+    expect(helper).toMatch(/clear\('passphrase-next'\)/);
+    expect(helper).toMatch(/clear\('passphrase-confirm'\)/);
+  });
 });
 
 describe('the viewer mode', () => {

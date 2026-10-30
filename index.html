@@ -91,6 +91,29 @@
     <p id="last-backup" role="status"></p>
     <p id="export-error" role="alert"></p>
   </section>
+
+  <section class="card security">
+    <h3>Passphrase and Face ID</h3>
+    <label for="passphrase-current">Current passphrase</label>
+    <input id="passphrase-current" type="password" autocomplete="current-password">
+    <label for="passphrase-next">New passphrase</label>
+    <input id="passphrase-next" type="password" autocomplete="new-password">
+    <label for="passphrase-confirm">New passphrase again</label>
+    <input id="passphrase-confirm" type="password" autocomplete="new-password">
+    <button id="passphrase-change" type="button">Change passphrase</button>
+    <p id="passphrase-notice" role="status"></p>
+    <p id="passphrase-error" role="alert"></p>
+    <button id="faceid-enroll" type="button" class="secondary">Set up Face ID on this device</button>
+    <p id="faceid-notice" role="status"></p>
+  </section>
+
+  <section class="card danger">
+    <h3>Erase everything</h3>
+    <p>This deletes your whole log from this phone, and cannot be undone. If you
+      are sharing, that stops too. A backup file is the only way back.</p>
+    <button id="erase-all" type="button">Erase all data</button>
+    <p id="erase-error" role="alert"></p>
+  </section>
 </main>
 
 <main id="viewer-screen" class="screen" hidden>

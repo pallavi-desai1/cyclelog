@@ -96,6 +96,16 @@ function returnToLock() {
   // plaintext-input exposure createViewer already guards against.
   clear('viewer-rekey-input');
   say('viewer-rekey-fingerprint', '');
+  // Same rule for the passphrase fields on Settings: a typed passphrase
+  // sitting in a plaintext input across a lock is the exposure createViewer
+  // already guards against.
+  clear('passphrase-current');
+  clear('passphrase-next');
+  clear('passphrase-confirm');
+  say('passphrase-notice', '');
+  say('passphrase-error', '');
+  say('faceid-notice', '');
+  say('erase-error', '');
   // A push timer armed before the lock must not fire against a document
   // that no longer exists in memory — openDoc is cleared a few lines down.
   if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
@@ -931,14 +941,23 @@ async function rekeyShare() {
 
 // §7.5: the honest limit, named here rather than discovered later — stopping
 // sharing stops the future, not whatever his app has already cached.
-async function stopSharing() {
+//
+// silent is for the erase path, which has already asked her a strictly
+// stronger question (type ERASE) and is about to destroy the share card this
+// function writes to. It suppresses this function's own prompt and messages
+// — and, in the catch below, rethrows instead of swallowing, because a
+// caller that is about to erase the vault must not be told a failed teardown
+// succeeded.
+async function stopSharing({ silent = false } = {}) {
   if (openDoc === null) return;
-  const ok = window.confirm(
-    'This stops sending new entries. It does not reach what his app has '
-    + 'already cached — he keeps the key for that, and it stays on his phone. '
-    + 'Stop sharing?',
-  );
-  if (!ok) return;
+  if (!silent) {
+    const ok = window.confirm(
+      'This stops sending new entries. It does not reach what his app has '
+      + 'already cached — he keeps the key for that, and it stays on his phone. '
+      + 'Stop sharing?',
+    );
+    if (!ok) return;
+  }
   try {
     const state = shareState(openDoc);
     if (state.identity !== null) {
@@ -964,6 +983,7 @@ async function stopSharing() {
     await persistShareDoc(doc => withoutSharing(doc));
     await drawShare();
   } catch (error) {
+    if (silent) throw error;
     if (openDoc === null) return;
     await drawShare();
     // A partial failure here must say she is still exposed, not just that
@@ -1297,6 +1317,88 @@ function exportPlaintext(kind) {
   }
 }
 
+// The vault re-wraps without checking the old passphrase, because it is
+// already unlocked. The screen checks anyway: an unlocked phone on a table
+// must not let someone set a new passphrase and lock her out of her history.
+async function changePassphrase() {
+  if (openDoc === null) return;
+  const current = el('passphrase-current').value;
+  const next = el('passphrase-next').value;
+  const confirm = el('passphrase-confirm').value;
+
+  say('passphrase-error', '');
+  say('passphrase-notice', '');
+  if (next.length < 8) return say('passphrase-error', 'Use at least 8 characters.');
+  if (next !== confirm) return say('passphrase-error', 'The two new passphrases differ.');
+
+  try {
+    if (!await vault.verifyPassphrase(current)) {
+      return say('passphrase-error', 'That is not your current passphrase.');
+    }
+    await vault.changePassphrase(next);
+  } catch {
+    // Includes the vault locking underneath this screen, which throws.
+    return say('passphrase-error', 'That could not be changed. Unlock and try again.');
+  }
+
+  clear('passphrase-current');
+  clear('passphrase-next');
+  clear('passphrase-confirm');
+  // Said explicitly because the data key did not change: Face ID still works,
+  // and her old backups still open with the OLD passphrase.
+  say('passphrase-notice', 'Changed. Face ID still works. Backup files you already '
+    + 'downloaded still need the old passphrase.');
+}
+
+// One enrolment path, shared with create() and createViewer(): offerFaceId
+// swallows every failure and returns early when the device cannot do it or
+// she declines, which is why this cannot promise more than it does.
+async function enrollFaceIdNow() {
+  if (openDoc === null) return;
+  say('faceid-notice', '');
+  await offerFaceId();
+  if (openDoc === null) return;
+  say('faceid-notice', 'If your phone asked and you agreed, Face ID is set up.');
+}
+
+// Local erase is not enough: the uploaded ciphertext and the viewer grants
+// live under a key inside the vault about to be destroyed, so sharing has to
+// be torn down first or they are orphaned on Google's servers forever.
+//
+// The order below is the whole point, and the recheck after the teardown is
+// what makes the order mean something: stopSharing can return normally with
+// sharing still on (a lock arriving mid-teardown stops it part-way), and
+// erasing then would orphan exactly what the ordering exists to prevent.
+async function eraseEverything() {
+  if (openDoc === null) return;
+  say('erase-error', '');
+  const typed = window.prompt(
+    'This erases your whole log from this phone and cannot be undone. '
+    + 'A backup file is the only way back. Type ERASE to confirm.',
+  );
+  if (typed !== 'ERASE') return;
+
+  try {
+    if (shareState(openDoc).key !== null) {
+      await stopSharing({ silent: true });
+      // Not a belt-and-braces check: a lock during the revoke loop makes
+      // stopSharing return with the key still in the document, and the
+      // vault is the only thing that can still authenticate as the uid
+      // that owns the uploaded copy.
+      if (openDoc === null || shareState(openDoc).key !== null) {
+        return say('erase-error', 'Sharing could not be stopped, so nothing was '
+          + 'erased. Unlock, stop sharing, then try again.');
+      }
+    }
+    await vault.erase();
+  } catch {
+    return say('erase-error', 'That did not finish. Nothing was erased — try again.');
+  }
+  hasVault = false;
+  returnToLock();
+  screen('setup');
+}
+
 function goToToday() {
   if (openDoc === null) return;
   // The same rule the calendar cells follow: navigation must not destroy a
@@ -1618,6 +1720,9 @@ el('settings-back').addEventListener('click', () => {
   screen('app');
 });
 
+el('passphrase-change').addEventListener('click', () => { changePassphrase().catch(() => {}); });
+el('faceid-enroll').addEventListener('click', () => { enrollFaceIdNow().catch(() => {}); });
+el('erase-all').addEventListener('click', () => { eraseEverything().catch(() => {}); });
 el('export-backup').addEventListener('click', () => { exportBackup(); });
 el('export-data').addEventListener('click', () => { exportPlaintext('data'); });
 el('export-days').addEventListener('click', () => { exportPlaintext('days'); });
