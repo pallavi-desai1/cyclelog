@@ -40,6 +40,10 @@ import { viewerRecord, parseViewerRecord, isViewerRecord, fetchShared } from '..
 import { renderViewerHeader } from './viewer.js';
 import { FIREBASE } from '../config.js';
 import { renderEpisodes, renderEpisodeForm, renderBackupWarning } from './settings.js';
+import {
+  addEpisode, updateEpisode, endEpisode, removeEpisode,
+} from '../episodes-edit.js';
+import { mergeSources } from '../merge.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -259,6 +263,140 @@ async function drawSettings() {
   }
   el('backup-warning').innerHTML = renderBackupWarning(await readLastBackup(backend), localToday());
   await drawShare();
+}
+
+// Reads the form, asks the model to apply it, writes the vault, then repaints.
+// The model is the only thing that decides whether an episode is allowed; this
+// function's job is to report what it said.
+async function saveEpisode() {
+  if (openDoc === null) return;
+  const host = el('episode-form-host');
+  const raw = host.querySelector('#episode-form').dataset.episodeIndex;
+  const index = raw === '' ? null : Number(raw);
+  const episode = {
+    startedOn: el('episode-started').value,
+    endedOn: el('episode-ended').value === '' ? null : el('episode-ended').value,
+    method: el('episode-method').value,
+    expectedEffect: el('episode-effect').value,
+  };
+
+  let next;
+  try {
+    next = index === null
+      ? addEpisode(openDoc, episode)
+      : updateEpisode(openDoc, index, episode);
+  } catch (error) {
+    say('episode-error', error.message);
+    return;
+  }
+
+  const epoch = sessionEpoch;
+  try {
+    await vault.save(serializeDocument(next));
+  } catch {
+    say('episode-error', 'That could not be saved. Try again.');
+    return;
+  }
+  if (sessionEpoch !== epoch || openDoc === null) return;
+  openDoc = next;
+  say('episode-error', '');
+  host.innerHTML = '';
+  // An episode changes which cycles count as baseline and which adaptation
+  // applies, so the summary on the home screen is now wrong until repainted.
+  await paint();
+  if (openDoc === null) return;
+  await drawSettings();
+}
+
+function editEpisodeAt(index) {
+  if (openDoc === null) return;
+  const episode = (openDoc.birthControl ?? [])[index];
+  if (episode === undefined) return;
+  el('episode-form-host').innerHTML = renderEpisodeForm({ episode, index });
+}
+
+async function endEpisodeAt(index) {
+  if (openDoc === null) return;
+  const episode = (openDoc.birthControl ?? [])[index];
+  if (episode === undefined) return;
+  const when = window.prompt(`What date did the ${episode.method} end?`, localToday());
+  if (when === null) return;
+
+  let next;
+  try {
+    next = endEpisode(openDoc, index, when);
+  } catch (error) {
+    say('episode-error', error.message);
+    return;
+  }
+  const epoch = sessionEpoch;
+  try {
+    await vault.save(serializeDocument(next));
+  } catch {
+    say('episode-error', 'That could not be saved. Try again.');
+    return;
+  }
+  if (sessionEpoch !== epoch || openDoc === null) return;
+  openDoc = next;
+  await paint();
+  if (openDoc === null) return;
+  await drawSettings();
+}
+
+async function removeEpisodeAt(index) {
+  if (openDoc === null) return;
+  const episode = (openDoc.birthControl ?? [])[index];
+  if (episode === undefined) return;
+  // Named, not "are you sure": removing an episode changes which cycles count
+  // as baseline, so it is not a cosmetic deletion.
+  const ok = window.confirm(
+    `Remove the ${episode.method} that started ${episode.startedOn}? `
+    + 'Your predictions will change.',
+  );
+  if (!ok) return;
+
+  const next = removeEpisode(openDoc, index);
+  const epoch = sessionEpoch;
+  try {
+    await vault.save(serializeDocument(next));
+  } catch {
+    say('episode-error', 'That could not be saved. Try again.');
+    return;
+  }
+  if (sessionEpoch !== epoch || openDoc === null) return;
+  openDoc = next;
+  await paint();
+  if (openDoc === null) return;
+  await drawSettings();
+}
+
+// A later export merged into what is already here. Replacing would throw away
+// every day logged by hand since the last import, which is most of them.
+async function importMore(files) {
+  if (openDoc === null || files.length === 0) return;
+  say('settings-import-notice', 'Reading your files…');
+  try {
+    let clueJson = null;
+    let legacyText = null;
+    for (const file of files) {
+      const text = await file.text();
+      if (file.name.endsWith('.json')) clueJson = text; else legacyText = text;
+    }
+    if (openDoc === null) return;
+
+    const incoming = documentFromSources({ clueJson, legacyText });
+    const merged = mergeSources(openDoc, incoming.doc);
+    const epoch = sessionEpoch;
+    await vault.save(serializeDocument(merged));
+    if (sessionEpoch !== epoch || openDoc === null) return;
+    openDoc = merged;
+    say('settings-import-notice', describeImport({ doc: merged, warnings: incoming.warnings }));
+    await paint();
+    if (openDoc === null) return;
+    await drawSettings();
+  } catch {
+    say('settings-import-notice', 'Those files could not be read.');
+  }
 }
 
 // Where a period would have fallen in THIS month, not merely the next one
@@ -1380,6 +1518,28 @@ el('export-backup').addEventListener('click', () => { exportBackup(); });
 el('export-data').addEventListener('click', () => { exportPlaintext('data'); });
 el('export-days').addEventListener('click', () => { exportPlaintext('days'); });
 el('export-cycles').addEventListener('click', () => { exportPlaintext('cycles'); });
+
+el('episode-form-host').addEventListener('click', (event) => {
+  if (event.target.id === 'episode-save') saveEpisode().catch(() => {});
+  if (event.target.id === 'episode-cancel') {
+    el('episode-form-host').innerHTML = renderEpisodeForm({ episode: null, index: null });
+  }
+});
+
+el('episodes').addEventListener('click', (event) => {
+  const edit = event.target.dataset.episodeEdit;
+  const end = event.target.dataset.episodeEnd;
+  const remove = event.target.dataset.episodeRemove;
+  if (edit !== undefined) editEpisodeAt(Number(edit));
+  if (end !== undefined) endEpisodeAt(Number(end)).catch(() => {});
+  if (remove !== undefined) removeEpisodeAt(Number(remove)).catch(() => {});
+});
+
+el('settings-import').addEventListener('change', (event) => {
+  importMore([...event.target.files]).catch(() => {});
+  event.target.value = '';
+});
+
 el('cal-today').addEventListener('click', () => { goToToday(); });
 el('cal-prev').addEventListener('click', () => { stepMonth(-1); });
 el('cal-next').addEventListener('click', () => { stepMonth(1); });

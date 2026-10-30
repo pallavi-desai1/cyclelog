@@ -85,6 +85,9 @@
     <button id="export-data" type="button" class="secondary">Download data (JSON)</button>
     <button id="export-days" type="button" class="secondary">Download days (CSV)</button>
     <button id="export-cycles" type="button" class="secondary">Download cycles (CSV)</button>
+    <label for="settings-import">Import another export (merged with what is here)</label>
+    <input id="settings-import" type="file" accept=".json,.txt,application/json,text/plain" multiple>
+    <p id="settings-import-notice" role="status"></p>
     <p id="last-backup" role="status"></p>
     <p id="export-error" role="alert"></p>
   </section>

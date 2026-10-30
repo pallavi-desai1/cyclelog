@@ -101,6 +101,7 @@ describe('app wiring', () => {
       'renderDay(dayDetail(viewerShared.doc, viewerDate, { todayISO: localToday(), adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date, baselineDates: [], }), { canEdit: false })',
       'renderEpisodes(openDoc.birthControl)',
       'renderEpisodeForm({ episode: null, index: null })',
+      'renderEpisodeForm({ episode, index })',
       'renderBackupWarning(await readLastBackup(backend), localToday())',
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
@@ -208,10 +209,13 @@ describe('idle locking', () => {
     expect(helper).toMatch(/closePicker\(\)/);   // the picker, through its own helper
     // Those six are the only sites that clear rendered markup, so there is
     // exactly one place that can forget a pane.
-    // +3, not +1: closePicker clears the month picker, drawViewerDay clears
-    // his day pane when there is no shared copy or no day selected, and
-    // settings-back discards the episode form on the way out of Settings.
-    expect(everywhere).toBe(inHelper + 3);
+    // +4, not +1: closePicker clears the month picker, drawViewerDay clears
+    // his day pane when there is no shared copy or no day selected,
+    // settings-back discards the episode form on the way out of Settings,
+    // and saveEpisode clears the form host after a successful save so
+    // drawSettings's "already rendered" check does not skip resetting it
+    // to the empty add-form.
+    expect(everywhere).toBe(inHelper + 4);
   });
 });
 
@@ -1118,6 +1122,55 @@ describe('the settings screen', () => {
     const markAt = body.indexOf('markBackup(');
     const warnAt = body.indexOf('renderBackupWarning(');
     expect(warnAt).toBeGreaterThan(markAt);
+  });
+
+  it('saves an episode through the guarded model functions, not by hand', () => {
+    const body = app();
+    expect(body).toMatch(/addEpisode\(/);
+    expect(body).toMatch(/updateEpisode\(/);
+    expect(body).toMatch(/endEpisode\(/);
+    expect(body).toMatch(/removeEpisode\(/);
+    // Never assembling birthControl in the glue: the model owns overlap
+    // rejection and the sort order, and a second path around it would not
+    // have either.
+    expect(body).not.toMatch(/birthControl\.push|birthControl:\s*\[\.\.\./);
+  });
+
+  it('re-renders the summary after an episode changes, because predictions moved', () => {
+    const body = functionBody(app(), 'saveEpisode');
+    expect(body, 'saveEpisode').not.toBeNull();
+    expect(body).toMatch(/paint\(\)|drawSummary|openSummary =/);
+  });
+
+  it('tells her what was wrong instead of failing silently', () => {
+    const body = functionBody(app(), 'saveEpisode');
+    expect(body).toMatch(/episode-error/);
+  });
+
+  it('confirms before removing an episode, naming what goes', () => {
+    const body = functionBody(app(), 'removeEpisodeAt');
+    expect(body, 'removeEpisodeAt').not.toBeNull();
+    expect(body).toMatch(/confirm\(/);
+  });
+
+  it('guards every episode handler against a lock arriving mid-save', () => {
+    for (const name of ['saveEpisode', 'removeEpisodeAt']) {
+      const body = functionBody(app(), name);
+      expect(body, name).toMatch(/openDoc === null/);
+    }
+  });
+
+  // Review Focus 5: importing a fresh export after months of manual logging
+  // must not discard the manual entries.
+  it('merges a re-import into what is already there rather than replacing it', () => {
+    const body = functionBody(app(), 'importMore');
+    expect(body, 'importMore').not.toBeNull();
+    expect(body).toMatch(/mergeSources\(/);
+    expect(body).toMatch(/openDoc/);
+  });
+
+  it('has a file input for a re-import', () => {
+    expect(html()).toContain('id="settings-import"');
   });
 });
 
