@@ -43,7 +43,7 @@ import { renderEpisodes, renderEpisodeForm, renderBackupWarning } from './settin
 import {
   addEpisode, updateEpisode, endEpisode, removeEpisode,
 } from '../episodes-edit.js';
-import { mergeIntoDocument } from '../merge.js';
+import { mergeIntoDocument, mergeConflicts } from '../merge.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -284,6 +284,10 @@ async function repaintFromSettings() {
   viewMonth = month;
   selectedDate = date;
   drawCalendar();
+  // The panel still holds the adapted and baseline dates computed before the
+  // episode changed, and paint() does not re-render it. A stale prediction
+  // one screen away is worse than none.
+  el('day-detail').innerHTML = '';
   screen('settings');
   await drawSettings();
 }
@@ -447,13 +451,24 @@ async function importMore(files) {
 
     const incoming = documentFromSources({ clueJson, legacyText });
     const merged = mergeIntoDocument(openDoc, incoming.doc);
+    // Computed from the same base as the merge, before the write moves
+    // openDoc on: the merge keeps the incoming side on a tie, so an end date
+    // she set by hand can be reverted by a re-import, and she is owed that.
+    const conflicts = mergeConflicts(openDoc, incoming.doc);
     const ok = await saveSettingsDoc(merged, 'settings-import-notice');
     if (ok === false || openDoc === null) return;
     // An edit form left open across this write remembers an index into
     // positions that have just moved — the merge re-sorts birthControl — so
     // saving it would land on a different episode than the one on screen.
     el('episode-form-host').innerHTML = '';
-    say('settings-import-notice', describeImport({ doc: merged, warnings: incoming.warnings }));
+    // incoming.doc, not merged: counting the merged document told her a
+    // small re-import had imported her entire history.
+    const notice = describeImport({ doc: incoming.doc, warnings: incoming.warnings });
+    const differed = conflicts.length === 1
+      ? '1 entry differed and the imported version was kept'
+      : `${conflicts.length} entries differed and the imported version was kept`;
+    const conflictNote = conflicts.length === 0 ? '' : ` ${differed} — check your birth control dates.`;
+    say('settings-import-notice', `${notice}${conflictNote}`);
     await repaintFromSettings();
   } catch {
     say('settings-import-notice', 'Those files could not be read.');
@@ -662,7 +677,9 @@ async function syncIdentity() {
   if (state.identity === null) {
     const created = await signInAnonymously({ apiKey: FIREBASE.apiKey, fetchImpl: fetch });
     if (openDoc === null) return null;
-    await persistShareDoc(withIdentity(openDoc, { uid: created.uid, refreshToken: created.refreshToken }));
+    await persistShareDoc(
+      doc => withIdentity(doc, { uid: created.uid, refreshToken: created.refreshToken }),
+    );
     if (openDoc === null) return null;
     return { uid: created.uid, idToken: created.idToken };
   }
@@ -683,11 +700,30 @@ async function syncIdentity() {
 // while this write is still in flight already sets openDoc to null, and
 // this function resuming afterwards must not revive it — the next unlock
 // reads the vault fresh.
-async function persistShareDoc(doc) {
+//
+// The third vault-write path, and the one that used to race the other two.
+// It takes a mutator rather than a document because its callers computed
+// theirs from openDoc BEFORE awaiting, so a write that landed in between
+// was reverted when this one adopted its stale copy. Waiting for any
+// in-flight write and then applying the change to whatever openDoc has
+// become makes that impossible, and publishing pendingSave lets a
+// concurrent paint() wait rather than read the pre-write document.
+async function persistShareDoc(mutate) {
+  // Deliberately ignores the rejection: a failed earlier write is the
+  // earlier caller's to report, and this one still needs the ordering.
+  await pendingSave?.catch(() => {});
+  if (openDoc === null) return;
+  const next = mutate(openDoc);
   const epoch = sessionEpoch;
-  await vault.save(serializeDocument(doc));
+  const writePromise = vault.save(serializeDocument(next));
+  pendingSave = writePromise;
+  try {
+    await writePromise;
+  } finally {
+    if (pendingSave === writePromise) pendingSave = null;
+  }
   if (sessionEpoch !== epoch) return;
-  openDoc = doc;
+  openDoc = next;
 }
 
 // Review Focus 3: every outcome is recorded, so the card tells her whether
@@ -715,11 +751,15 @@ async function pushShare() {
     // scope travels with the result so describePush can tell a push that
     // landed under an older scope from one that matches what she has now
     // chosen (Critical 3).
-    await persistShareDoc(withPushResult(openDoc, { at: localToday(), status: 'ok', scope: state.scope }));
+    await persistShareDoc(
+      doc => withPushResult(doc, { at: localToday(), status: 'ok', scope: state.scope }),
+    );
   } catch (error) {
     if (openDoc === null) return;
     const status = error && error.kind ? error.kind : 'server';
-    await persistShareDoc(withPushResult(openDoc, { at: localToday(), status, scope: state.scope }));
+    await persistShareDoc(
+      doc => withPushResult(doc, { at: localToday(), status, scope: state.scope }),
+    );
   }
   if (openDoc === null) return;
   await drawShare();
@@ -735,7 +775,7 @@ async function schedulePush() {
   if (state.key === null) return;
   if (pushTimer !== null) clearTimeout(pushTimer);
   await persistShareDoc(
-    withPushResult(openDoc, { at: localToday(), status: 'pending', scope: state.scope }),
+    doc => withPushResult(doc, { at: localToday(), status: 'pending', scope: state.scope }),
   );
   if (openDoc === null) return;
   await drawShare();
@@ -765,7 +805,7 @@ async function startSharing() {
   const scopeField = document.getElementById('share-scope');
   const scope = scopeField === null ? 'dates' : scopeField.value;
   try {
-    await persistShareDoc(withSharing(openDoc, { key: generateSyncKey(), scope }));
+    await persistShareDoc(doc => withSharing(doc, { key: generateSyncKey(), scope }));
     // Redrawn right here, before the network step below: the document
     // already says sharing is on, so the card must too, even if the sign-in
     // that follows fails or the vault locks mid-flight. Without this a
@@ -788,7 +828,10 @@ async function startSharing() {
 async function changeShareScope() {
   if (openDoc === null) return;
   try {
-    await persistShareDoc(withScope(openDoc, el('share-scope').value));
+    // Read here, not inside the mutator: the mutator runs after an await, and
+    // the value she chose is the one at the moment she chose it.
+    const scope = el('share-scope').value;
+    await persistShareDoc(doc => withScope(doc, scope));
     if (openDoc === null) return;
     await drawShare();
     // §7.6: the scope change re-encrypts the whole payload, so he needs it
@@ -831,7 +874,7 @@ async function addShareViewer() {
       projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid, grantedAt, fetchImpl: fetch,
     });
     if (openDoc === null) return;
-    await persistShareDoc(withViewer(openDoc, { uid: viewerUid, label, grantedAt }));
+    await persistShareDoc(doc => withViewer(doc, { uid: viewerUid, label, grantedAt }));
     if (openDoc === null) return;
     clear('share-viewer-uid');
     clear('share-viewer-label');
@@ -851,7 +894,7 @@ async function removeShareViewer(viewerUid) {
     const { uid: ownerUid, idToken } = identity;
     await revokeViewer({ projectId: FIREBASE.projectId, idToken, ownerUid, viewerUid, fetchImpl: fetch });
     if (openDoc === null) return;
-    await persistShareDoc(withoutViewer(openDoc, viewerUid));
+    await persistShareDoc(doc => withoutViewer(doc, viewerUid));
     if (openDoc === null) return;
     await drawShare();
   } catch (error) {
@@ -875,7 +918,7 @@ async function rekeyShare() {
   if (!ok) return;
   try {
     const scope = shareState(openDoc).scope;
-    await persistShareDoc(withSharing(openDoc, { key: generateSyncKey(), scope }));
+    await persistShareDoc(doc => withSharing(doc, { key: generateSyncKey(), scope }));
     if (openDoc === null) return;
     await drawShare();
     schedulePush().catch(() => {});
@@ -918,7 +961,7 @@ async function stopSharing() {
     }
     if (openDoc === null) return;
     if (pushTimer !== null) { clearTimeout(pushTimer); pushTimer = null; }
-    await persistShareDoc(withoutSharing(openDoc));
+    await persistShareDoc(doc => withoutSharing(doc));
     await drawShare();
   } catch (error) {
     if (openDoc === null) return;

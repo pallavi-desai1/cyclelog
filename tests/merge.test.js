@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeSources, mergeIntoDocument, MERGE_DAY_FIELDS } from '../src/merge.js';
+import { mergeSources, mergeIntoDocument, mergeConflicts, MERGE_DAY_FIELDS } from '../src/merge.js';
 import { parseDocument, serializeDocument } from '../src/import.js';
 import { blankDay } from '../src/importers/clue.js';
 
@@ -233,5 +233,33 @@ describe('mergeIntoDocument', () => {
   it('survives a round trip through the vault serialiser', () => {
     const merged = mergeIntoDocument(open(), incoming());
     expect(() => parseDocument(serializeDocument(merged))).not.toThrow();
+  });
+});
+
+// A re-import can revert an episode end date set by hand: birthControl is
+// keyed on startedOn and a tie goes to the incoming side. The precedence is
+// deliberate; silently discarding the record of it was not.
+describe('mergeConflicts', () => {
+  const openWithEndedEpisode = () => ({
+    version: 1,
+    days: {}, spans: [], gaps: [],
+    birthControl: [{ method: 'implant', startedOn: '2015-05-01', endedOn: '2015-09-02', expectedEffect: 'suppress' }],
+  });
+  const stillOpenIncoming = () => ({
+    version: 1,
+    days: {}, spans: [], gaps: [],
+    birthControl: [{ method: 'implant', startedOn: '2015-05-01', endedOn: null, expectedEffect: 'suppress' }],
+  });
+
+  it('reports the hand-set end date a re-import overrode', () => {
+    const conflicts = mergeConflicts(openWithEndedEpisode(), stillOpenIncoming());
+    expect(conflicts.length).toBeGreaterThan(0);
+    expect(conflicts.some(entry => entry.field === 'birthControl')).toBe(true);
+    const merged = mergeIntoDocument(openWithEndedEpisode(), stillOpenIncoming());
+    expect(merged.birthControl[0].endedOn).toBeNull();
+  });
+
+  it('reports nothing when a re-import changes nothing', () => {
+    expect(mergeConflicts(openWithEndedEpisode(), openWithEndedEpisode())).toEqual([]);
   });
 });

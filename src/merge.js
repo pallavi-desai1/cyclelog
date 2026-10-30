@@ -146,3 +146,12 @@ export function mergeIntoDocument(openDoc, incomingDoc) {
   const result = mergeSources(openDoc, incomingDoc);
   return { ...openDoc, ...result.doc };
 }
+
+// The other half of the same merge, kept as a separate export so
+// mergeIntoDocument can go on returning a plain document. A re-import can
+// revert an episode end date she set by hand — birthControl ties go to the
+// incoming side — and the caller needs to be able to say so rather than
+// discard the record of it.
+export function mergeConflicts(openDoc, incomingDoc) {
+  return mergeSources(openDoc, incomingDoc).conflicts;
+}

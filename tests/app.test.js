@@ -233,7 +233,9 @@ describe('idle locking', () => {
     // and importMore clear the form host too, because each of them moves
     // the positions an open form's remembered index refers to, and saving a
     // stale index overwrote a different episode than the one on screen.
-    expect(everywhere).toBe(inHelper + 7);
+    // +8 now, not +7: repaintFromSettings clears the day panel, which would
+    // otherwise go on showing predictions computed before the episode change.
+    expect(everywhere).toBe(inHelper + 8);
   });
 });
 
@@ -977,7 +979,9 @@ describe('the owner side of sharing', () => {
     const body = functionBody(app(), 'persistShareDoc');
     expect(body, 'persistShareDoc').not.toBeNull();
     const save = body.indexOf('vault.save(');
-    const adopt = body.indexOf('openDoc = doc');
+    // The local is `next` since persistShareDoc took a mutator; the
+    // assertion is unchanged — the write must precede the adoption.
+    const adopt = body.indexOf('openDoc = next');
     expect(save).toBeGreaterThan(-1);
     expect(adopt).toBeGreaterThan(save);
   });
@@ -1073,6 +1077,16 @@ describe('the owner side of sharing', () => {
     expect(body, 'paint').not.toBeNull();
     expect(body).toMatch(/lastPush\.status !== 'ok'/);
     expect(body).toMatch(/schedulePush\(\)/);
+  });
+
+  it('builds every share write from the document at write time, not before', () => {
+    const body = app();
+    // A prebuilt document computed from openDoc before an await is exactly
+    // what let a push write revert a settings write that landed first.
+    expect(body).not.toMatch(/persistShareDoc\(\s*with[A-Za-z]+\(openDoc/);
+    const helper = functionBody(body, 'persistShareDoc');
+    expect(helper).toMatch(/pendingSave/);
+    expect(helper).toMatch(/mutate\(openDoc\)/);
   });
 });
 
@@ -1178,11 +1192,14 @@ describe('the settings screen', () => {
     for (const name of ['saveEpisode', 'endEpisodeAt', 'removeEpisodeAt', 'importMore']) {
       const body = functionBody(app(), name);
       expect(body, name).not.toBeNull();
-      // The guard that matters is the one AFTER the write resolves — the
-      // first line's check happens before anything can have changed.
-      const firstAwait = body.indexOf('await ');
-      expect(firstAwait, name).toBeGreaterThan(-1);
-      expect(body.slice(firstAwait), name).toMatch(/openDoc === null|ok === false|!ok/);
+      // The guard that matters is the one AFTER the write resolves. Slicing
+      // at the FIRST await made this vacuous for importMore, whose routing
+      // loop awaits file.text() and is followed by its own openDoc check:
+      // that satisfied the regex on its own, so deleting the post-write
+      // guard left the test green. Anchor on the write instead.
+      const writeAt = body.lastIndexOf('await saveSettingsDoc(');
+      expect(writeAt, name).toBeGreaterThan(-1);
+      expect(body.slice(writeAt), name).toMatch(/openDoc === null|ok === false|!ok/);
     }
   });
 
@@ -1218,7 +1235,9 @@ describe('the settings screen', () => {
     // paint's navigate:false opt-out: the summary is still recomputed, but
     // without ending on the app screen and bouncing back.
     expect(body).toMatch(/await paint\('', \{ navigate: false \}\)/);
-    const paintAt = body.indexOf('paint(');
+    // 'paint(' alone matched the comment at the top of the body, so this
+    // ordering assertion could no longer fail. Anchor on the call itself.
+    const paintAt = body.indexOf('await paint(');
     const screenAt = body.indexOf("screen('settings')");
     expect(screenAt).toBeGreaterThan(paintAt);
   });
