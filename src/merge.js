@@ -136,3 +136,13 @@ export function mergeSources(...sources) {
 
   return { doc, conflicts };
 }
+
+// Merging a later export into the open document. Exported separately from
+// mergeSources because it is the part with the two traps: mergeSources
+// returns { doc, conflicts } rather than a document, and it rebuilds only
+// the sections it merges — so anything else the document carries must be
+// preserved explicitly.
+export function mergeIntoDocument(openDoc, incomingDoc) {
+  const result = mergeSources(openDoc, incomingDoc);
+  return { ...openDoc, ...result.doc };
+}

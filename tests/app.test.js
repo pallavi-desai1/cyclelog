@@ -17,7 +17,20 @@ function functionBody(text, name) {
   const marker = `function ${name}(`;
   const markerIndex = text.indexOf(marker);
   if (markerIndex === -1) return null;
-  const braceStart = text.indexOf('{', markerIndex);
+  // Step over the parameter list by balancing its parentheses before looking
+  // for the opening brace: a destructured parameter (`{ navigate = true }`)
+  // puts a `{` ahead of the body, and taking that one as the body's start
+  // returned the parameter object instead of the function.
+  let parens = 0;
+  let paramsEnd = markerIndex + marker.length - 1;
+  for (let i = paramsEnd; i < text.length; i++) {
+    if (text[i] === '(') parens++;
+    else if (text[i] === ')') {
+      parens--;
+      if (parens === 0) { paramsEnd = i; break; }
+    }
+  }
+  const braceStart = text.indexOf('{', paramsEnd);
   let depth = 0;
   for (let i = braceStart; i < text.length; i++) {
     if (text[i] === '{') depth++;
@@ -214,8 +227,11 @@ describe('idle locking', () => {
     // settings-back discards the episode form on the way out of Settings,
     // and saveEpisode clears the form host after a successful save so
     // drawSettings's "already rendered" check does not skip resetting it
-    // to the empty add-form.
-    expect(everywhere).toBe(inHelper + 4);
+    // to the empty add-form. +7 now, not +4: endEpisodeAt, removeEpisodeAt
+    // and importMore clear the form host too, because each of them moves
+    // the positions an open form's remembered index refers to, and saving a
+    // stale index overwrote a different episode than the one on screen.
+    expect(everywhere).toBe(inHelper + 7);
   });
 });
 
@@ -1156,10 +1172,15 @@ describe('the settings screen', () => {
     expect(body).toMatch(/confirm\(/);
   });
 
-  it('guards every episode handler against a lock arriving mid-save', () => {
-    for (const name of ['saveEpisode', 'removeEpisodeAt']) {
+  it('guards every settings write against a lock arriving mid-save', () => {
+    for (const name of ['saveEpisode', 'endEpisodeAt', 'removeEpisodeAt', 'importMore']) {
       const body = functionBody(app(), name);
-      expect(body, name).toMatch(/openDoc === null/);
+      expect(body, name).not.toBeNull();
+      // The guard that matters is the one AFTER the write resolves — the
+      // first line's check happens before anything can have changed.
+      const firstAwait = body.indexOf('await ');
+      expect(firstAwait, name).toBeGreaterThan(-1);
+      expect(body.slice(firstAwait), name).toMatch(/openDoc === null|ok === false|!ok/);
     }
   });
 
@@ -1168,7 +1189,10 @@ describe('the settings screen', () => {
   it('merges a re-import into what is already there rather than replacing it', () => {
     const body = functionBody(app(), 'importMore');
     expect(body, 'importMore').not.toBeNull();
-    expect(body).toMatch(/mergeSources\(/);
+    // The behaviour itself is covered by tests that execute mergeIntoDocument
+    // (tests/merge.test.js); this only pins that importMore goes through it
+    // rather than building a replacement document of its own.
+    expect(body).toMatch(/mergeIntoDocument\(/);
     expect(body).toMatch(/openDoc/);
   });
 
@@ -1189,8 +1213,10 @@ describe('the settings screen', () => {
   it('still recomputes the summary an episode change invalidated', () => {
     const body = functionBody(app(), 'repaintFromSettings');
     expect(body, 'repaintFromSettings').not.toBeNull();
-    expect(body).toMatch(/await paint\(\)/);
-    const paintAt = body.indexOf('paint()');
+    // paint's navigate:false opt-out: the summary is still recomputed, but
+    // without ending on the app screen and bouncing back.
+    expect(body).toMatch(/await paint\('', \{ navigate: false \}\)/);
+    const paintAt = body.indexOf('paint(');
     const screenAt = body.indexOf("screen('settings')");
     expect(screenAt).toBeGreaterThan(paintAt);
   });

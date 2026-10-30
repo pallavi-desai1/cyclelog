@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mergeSources, MERGE_DAY_FIELDS } from '../src/merge.js';
+import { mergeSources, mergeIntoDocument, MERGE_DAY_FIELDS } from '../src/merge.js';
+import { parseDocument, serializeDocument } from '../src/import.js';
 import { blankDay } from '../src/importers/clue.js';
 
 const legacySpan = { start: '2015-01-01', end: '2015-01-05', precision: 'exact', endPrecision: 'exact', source: 'legacy' };
@@ -195,5 +196,42 @@ describe('mergeSources', () => {
     expect(conflicts).toEqual([
       { date: '2015-01-01', field: 'span', kept: clueVersion, discarded: legacyVersion },
     ]);
+  });
+});
+
+describe('mergeIntoDocument', () => {
+  const open = () => ({
+    version: 1,
+    days: { '2015-03-20': { flow: 'heavy', source: 'manual' } },
+    spans: [], gaps: [], birthControl: [],
+    sharing: { key: 'SYNCKEY', scope: 'symptoms', viewers: [{ uid: 'viewer-one' }] },
+  });
+  const incoming = () => ({
+    version: 1,
+    days: { '2015-04-01': { flow: 'light', source: 'clue' } },
+    spans: [], gaps: [], birthControl: [],
+  });
+
+  it('returns a document the app can read back', () => {
+    const merged = mergeIntoDocument(open(), incoming());
+    expect(merged.version).toBe(1);
+    expect(merged.doc).toBeUndefined();
+    expect(merged.conflicts).toBeUndefined();
+  });
+
+  it('keeps days logged by hand as well as the imported ones', () => {
+    const merged = mergeIntoDocument(open(), incoming());
+    expect(merged.days['2015-03-20']).toBeTruthy();
+    expect(merged.days['2015-04-01']).toBeTruthy();
+  });
+
+  it('preserves sections the merge does not own, so sharing survives', () => {
+    const merged = mergeIntoDocument(open(), incoming());
+    expect(merged.sharing).toEqual(open().sharing);
+  });
+
+  it('survives a round trip through the vault serialiser', () => {
+    const merged = mergeIntoDocument(open(), incoming());
+    expect(() => parseDocument(serializeDocument(merged))).not.toThrow();
   });
 });

@@ -43,7 +43,7 @@ import { renderEpisodes, renderEpisodeForm, renderBackupWarning } from './settin
 import {
   addEpisode, updateEpisode, endEpisode, removeEpisode,
 } from '../episodes-edit.js';
-import { mergeSources } from '../merge.js';
+import { mergeIntoDocument } from '../merge.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -200,7 +200,11 @@ let unsavedWarning = null;
 // document that is about to leave memory.
 let pushTimer = null;
 
-async function paint(note = '') {
+// `navigate: false` repaints everything in place without ending on the app
+// screen — Settings repaints the summary an episode change invalidated while
+// she is still standing on Settings, and navigating there and back flashed
+// the home screen at her.
+async function paint(note = '', { navigate = true } = {}) {
   // See pendingSave above. Ignoring a rejection here is deliberate: a save
   // that failed is unsavedWarning's problem to surface, not a reason to
   // block getting back into the app.
@@ -237,7 +241,7 @@ async function paint(note = '') {
       schedulePush().catch(() => {});
     }
   }
-  screen('app');
+  if (navigate) screen('app');
 }
 
 // Review Focus 3: she only trusts this card if it tells the truth about what
@@ -270,10 +274,55 @@ async function drawSettings() {
 // has to repaint the summary it invalidated WITHOUT navigating away from
 // the screen she is still working on.
 async function repaintFromSettings() {
-  await paint();
+  // paint() resets viewMonth and selectedDate unconditionally, so where she
+  // was in the calendar is captured here and put back afterwards: an episode
+  // edit must not quietly send her back to this month with nothing selected.
+  const month = viewMonth;
+  const date = selectedDate;
+  await paint('', { navigate: false });
   if (openDoc === null) return;
+  viewMonth = month;
+  selectedDate = date;
+  drawCalendar();
   screen('settings');
   await drawSettings();
+}
+
+// Every write from Settings goes through here. saveDay already carries the
+// hard-won rules — the vault is the authority, nothing is adopted into
+// memory until the encrypted write resolves, a concurrent paint() waits on
+// pendingSave rather than reading the pre-write document, and a lock
+// arriving mid-write must not revive the document afterwards. A second
+// write path that forgot any of them is what let a removed episode come
+// back. Returns true only when the vault actually holds `next`.
+async function saveSettingsDoc(next, errorId = 'episode-error') {
+  if (saveInFlight) {
+    say(errorId, 'Still saving — one moment.');
+    return false;
+  }
+  saveInFlight = true;
+  const epoch = sessionEpoch;
+  let writePromise;
+  try {
+    writePromise = vault.save(serializeDocument(next));
+    pendingSave = writePromise;
+    await writePromise;
+    if (sessionEpoch !== epoch) return false;
+    openDoc = next;
+    // An episode is precisely the thing that moves the prediction model, so
+    // the shared copy is wrong until it is pushed. Not awaited: her write
+    // already landed, and the courtesy copy must never hold that up.
+    schedulePush().catch(() => {});
+    return true;
+  } catch {
+    say(errorId, 'That could not be saved. Try again.');
+    return false;
+  } finally {
+    saveInFlight = false;
+    // Only clear the slot this call itself set — a stale handle from the
+    // wrong call must never erase a newer save's pendingSave.
+    if (pendingSave === writePromise) pendingSave = null;
+  }
 }
 
 // Reads the form, asks the model to apply it, writes the vault, then repaints.
@@ -301,15 +350,8 @@ async function saveEpisode() {
     return;
   }
 
-  const epoch = sessionEpoch;
-  try {
-    await vault.save(serializeDocument(next));
-  } catch {
-    say('episode-error', 'That could not be saved. Try again.');
-    return;
-  }
-  if (sessionEpoch !== epoch || openDoc === null) return;
-  openDoc = next;
+  const ok = await saveSettingsDoc(next, 'episode-error');
+  if (ok === false || openDoc === null) return;
   say('episode-error', '');
   host.innerHTML = '';
   // An episode changes which cycles count as baseline and which adaptation
@@ -330,6 +372,10 @@ async function endEpisodeAt(index) {
   if (episode === undefined) return;
   const when = window.prompt(`What date did the ${episode.method} end?`, localToday());
   if (when === null) return;
+  // An empty answer is a mistake, not a value: clean() maps it back to null,
+  // which writes a document identical to the current one and tells her
+  // nothing while the episode stays open.
+  if (when.trim() === '') return say('episode-error', 'Give the date it ended.');
 
   let next;
   try {
@@ -338,15 +384,12 @@ async function endEpisodeAt(index) {
     say('episode-error', error.message);
     return;
   }
-  const epoch = sessionEpoch;
-  try {
-    await vault.save(serializeDocument(next));
-  } catch {
-    say('episode-error', 'That could not be saved. Try again.');
-    return;
-  }
-  if (sessionEpoch !== epoch || openDoc === null) return;
-  openDoc = next;
+  const ok = await saveSettingsDoc(next, 'episode-error');
+  if (ok === false || openDoc === null) return;
+  // An edit form left open across this write remembers an index into
+  // positions that have just moved, so saving it would land on a different
+  // episode than the one on screen.
+  el('episode-form-host').innerHTML = '';
   await repaintFromSettings();
 }
 
@@ -356,22 +399,19 @@ async function removeEpisodeAt(index) {
   if (episode === undefined) return;
   // Named, not "are you sure": removing an episode changes which cycles count
   // as baseline, so it is not a cosmetic deletion.
-  const ok = window.confirm(
+  const confirmed = window.confirm(
     `Remove the ${episode.method} that started ${episode.startedOn}? `
     + 'Your predictions will change.',
   );
-  if (!ok) return;
+  if (!confirmed) return;
 
   const next = removeEpisode(openDoc, index);
-  const epoch = sessionEpoch;
-  try {
-    await vault.save(serializeDocument(next));
-  } catch {
-    say('episode-error', 'That could not be saved. Try again.');
-    return;
-  }
-  if (sessionEpoch !== epoch || openDoc === null) return;
-  openDoc = next;
+  const ok = await saveSettingsDoc(next, 'episode-error');
+  if (ok === false || openDoc === null) return;
+  // An edit form left open across this write remembers an index into
+  // positions that have just moved — removeEpisode re-indexes — so saving
+  // it would land on a different episode than the one on screen.
+  el('episode-form-host').innerHTML = '';
   await repaintFromSettings();
 }
 
@@ -381,20 +421,38 @@ async function importMore(files) {
   if (openDoc === null || files.length === 0) return;
   say('settings-import-notice', 'Reading your files…');
   try {
+    // Lowercased before the test: endsWith is case-sensitive, so a Clue
+    // export named Clue.JSON went to the legacy parser and imported nothing
+    // while reporting success. A second file of either kind is refused
+    // rather than silently overwriting the first.
     let clueJson = null;
     let legacyText = null;
     for (const file of files) {
       const text = await file.text();
-      if (file.name.endsWith('.json')) clueJson = text; else legacyText = text;
+      if (file.name.toLowerCase().endsWith('.json')) {
+        if (clueJson !== null) {
+          say('settings-import-notice', 'Choose one export file at a time.');
+          return;
+        }
+        clueJson = text;
+      } else {
+        if (legacyText !== null) {
+          say('settings-import-notice', 'Choose one export file at a time.');
+          return;
+        }
+        legacyText = text;
+      }
     }
     if (openDoc === null) return;
 
     const incoming = documentFromSources({ clueJson, legacyText });
-    const merged = mergeSources(openDoc, incoming.doc);
-    const epoch = sessionEpoch;
-    await vault.save(serializeDocument(merged));
-    if (sessionEpoch !== epoch || openDoc === null) return;
-    openDoc = merged;
+    const merged = mergeIntoDocument(openDoc, incoming.doc);
+    const ok = await saveSettingsDoc(merged, 'settings-import-notice');
+    if (ok === false || openDoc === null) return;
+    // An edit form left open across this write remembers an index into
+    // positions that have just moved — the merge re-sorts birthControl — so
+    // saving it would land on a different episode than the one on screen.
+    el('episode-form-host').innerHTML = '';
     say('settings-import-notice', describeImport({ doc: merged, warnings: incoming.warnings }));
     await repaintFromSettings();
   } catch {
