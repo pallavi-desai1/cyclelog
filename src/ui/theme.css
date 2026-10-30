@@ -21,6 +21,7 @@
   --baseline: #B9A4D4;
   --positive: #3F8F86;
   --spotting: #A9705B;
+  --danger: #B3261E;
   --warning: #B06A1F;
   --line: #FBCEDC;
   --warn-bg: #FBE7D3;
@@ -41,6 +42,7 @@
     --text: #F7E6EC;
     --heading: #F7AFC8;
     --interactive: #E8799C;
+    --danger: #F2B8B5;
     --baseline: #C9B6E4;
     --line: #3A2630;
     --warn-bg: #3A2A18;
@@ -522,4 +524,24 @@ input { font-family: var(--font-body); }
   border-radius: 0.4rem;
   background: var(--warn-bg);
   color: var(--warn-ink);
+}
+
+/* The one irreversible button in the app. It sat in the same pink as Save
+   and Download, which is wrong for an action whose confirmation dialogue
+   has to talk her out of it: a destructive control should not be the thing
+   a thumb reaches for by habit. Outlined rather than filled, so it reads as
+   deliberate instead of inviting, and the card carries the same warning
+   edge as the backup notice. */
+.card.danger {
+  border-color: var(--danger);
+}
+
+.card.danger h3 {
+  color: var(--danger);
+}
+
+#erase-all {
+  background: transparent;
+  color: var(--danger);
+  border: 2px solid var(--danger);
 }
