@@ -19,6 +19,7 @@ const PRECACHE = [
   'src/dates.js',
   'src/divergence.js',
   'src/episodes.js',
+  'src/episodes-edit.js',
   'src/merge.js',
   'src/predict.js',
   'src/spans.js',
