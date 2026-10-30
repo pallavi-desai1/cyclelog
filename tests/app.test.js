@@ -99,6 +99,9 @@ describe('app wiring', () => {
       "renderViewerHeader({ scope: null, updatedAt: null, label: '', uid: viewerRecordData.identity.uid })",
       "renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid }) + renderSummary(summary) + renderCalendar(grid)",
       'renderDay(dayDetail(viewerShared.doc, viewerDate, { todayISO: localToday(), adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date, baselineDates: [], }), { canEdit: false })',
+      'renderEpisodes(openDoc.birthControl)',
+      'renderEpisodeForm({ episode: null, index: null })',
+      'renderBackupWarning(await readLastBackup(backend), localToday())',
     ];
     for (const [, expression] of app().matchAll(/innerHTML = ([^;]+);/g)) {
       expect(allowed).toContain(squash(expression));
@@ -201,13 +204,14 @@ describe('idle locking', () => {
     const helper = functionBody(text, 'returnToLock');
     const inHelper = (helper.match(/innerHTML = ''/g) || []).length;
     const everywhere = (text.match(/innerHTML = ''/g) || []).length;
-    expect(inHelper).toBe(6);             // the summary, the calendar, the day panel, the share card, his viewer pane and his day panel
+    expect(inHelper).toBe(9);             // the summary, the calendar, the day panel, the share card, his viewer pane, his day panel, the episode list, the episode form host and the backup warning
     expect(helper).toMatch(/closePicker\(\)/);   // the picker, through its own helper
     // Those six are the only sites that clear rendered markup, so there is
     // exactly one place that can forget a pane.
-    // +2, not +1: closePicker clears the month picker, and drawViewerDay
-    // clears his day pane when there is no shared copy or no day selected.
-    expect(everywhere).toBe(inHelper + 2);
+    // +3, not +1: closePicker clears the month picker, drawViewerDay clears
+    // his day pane when there is no shared copy or no day selected, and
+    // settings-back discards the episode form on the way out of Settings.
+    expect(everywhere).toBe(inHelper + 3);
   });
 });
 
@@ -1047,6 +1051,57 @@ describe('the owner side of sharing', () => {
     expect(body, 'paint').not.toBeNull();
     expect(body).toMatch(/lastPush\.status !== 'ok'/);
     expect(body).toMatch(/schedulePush\(\)/);
+  });
+});
+
+describe('the settings screen', () => {
+  it('exists as its own screen', () => {
+    expect(html()).toContain('id="settings"');
+    expect(app()).toMatch(/'settings'/);
+  });
+
+  it('is reachable from home and goes back', () => {
+    expect(html()).toContain('id="go-settings"');
+    expect(html()).toContain('id="settings-back"');
+    expect(app()).toMatch(/go-settings'\)\.addEventListener/);
+    expect(app()).toMatch(/settings-back'\)\.addEventListener/);
+  });
+
+  it('holds the share card and the exports, which are no longer on home', () => {
+    const text = html();
+    // Moved, not copied: two copies would mean two sets of controls bound to
+    // the same ids, and the handlers would only ever find the first.
+    expect((text.match(/id="share"/g) || []).length).toBe(1);
+    expect((text.match(/id="export-backup"/g) || []).length).toBe(1);
+    const settingsAt = text.indexOf('id="settings"');
+    expect(settingsAt).toBeGreaterThan(-1);
+    expect(text.indexOf('id="share"')).toBeGreaterThan(settingsAt);
+    expect(text.indexOf('id="export-backup"')).toBeGreaterThan(settingsAt);
+  });
+
+  it('has somewhere to put the episode list and form', () => {
+    expect(html()).toContain('id="episodes"');
+    expect(html()).toContain('id="episode-form-host"');
+  });
+
+  it('renders episodes, the form and the backup warning through the tested renderers', () => {
+    const body = functionBody(app(), 'drawSettings');
+    expect(body, 'drawSettings').not.toBeNull();
+    expect(body).toMatch(/renderEpisodes\(/);
+    expect(body).toMatch(/renderEpisodeForm\(/);
+    expect(body).toMatch(/renderBackupWarning\(/);
+  });
+
+  it('clears the settings panes on lock, like every other pane', () => {
+    const helper = functionBody(app(), 'returnToLock');
+    expect(helper).toMatch(/episodes'\)\.innerHTML = ''/);
+    expect(helper).toMatch(/episode-form-host'\)\.innerHTML = ''/);
+  });
+
+  it('precaches the new modules, so settings works offline', () => {
+    const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+    expect(sw).toContain('src/ui/settings.js');
+    expect(sw).toContain('src/episodes-edit.js');
   });
 });
 

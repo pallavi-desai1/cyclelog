@@ -60,6 +60,36 @@
   </details>
 </main>
 
+<main id="settings" class="screen" hidden>
+  <div class="settings-head">
+    <button id="settings-back" type="button">&lsaquo; Back</button>
+    <h2>Settings</h2>
+  </div>
+
+  <section class="card episodes">
+    <h3>Birth control</h3>
+    <p class="episodes-note">Each method you have been on, with the dates. Predictions
+      use the current one, and compare it against your natural cycles from before the
+      first one.</p>
+    <div id="episodes"></div>
+    <div id="episode-form-host"></div>
+  </section>
+
+  <div id="share"></div>
+
+  <section class="card exports">
+    <h3>Your data</h3>
+    <p class="exports-note">Everything here is produced on this device. Nothing is uploaded.</p>
+    <div id="backup-warning"></div>
+    <button id="export-backup" type="button">Download encrypted backup</button>
+    <button id="export-data" type="button" class="secondary">Download data (JSON)</button>
+    <button id="export-days" type="button" class="secondary">Download days (CSV)</button>
+    <button id="export-cycles" type="button" class="secondary">Download cycles (CSV)</button>
+    <p id="last-backup" role="status"></p>
+    <p id="export-error" role="alert"></p>
+  </section>
+</main>
+
 <main id="viewer-screen" class="screen" hidden>
   <div id="viewer"></div>
   <div id="viewer-day"></div>
@@ -96,19 +126,7 @@
 
   <div id="day-detail"></div>
 
-  <div id="share"></div>
-
-  <section class="card exports">
-    <h3>Your data</h3>
-    <p class="exports-note">Everything here is produced on this device. Nothing is uploaded.</p>
-    <button id="export-backup" type="button">Download encrypted backup</button>
-    <button id="export-data" type="button" class="secondary">Download data (JSON)</button>
-    <button id="export-days" type="button" class="secondary">Download days (CSV)</button>
-    <button id="export-cycles" type="button" class="secondary">Download cycles (CSV)</button>
-    <p id="last-backup" role="status"></p>
-    <p id="export-error" role="alert"></p>
-  </section>
-
+  <button id="go-settings" type="button" class="secondary">Settings</button>
   <button id="lock-now" type="button">Lock</button>
 </main>
 

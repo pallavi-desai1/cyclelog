@@ -39,6 +39,7 @@ import {
 import { viewerRecord, parseViewerRecord, isViewerRecord, fetchShared } from '../sync/viewer.js';
 import { renderViewerHeader } from './viewer.js';
 import { FIREBASE } from '../config.js';
+import { renderEpisodes, renderEpisodeForm, renderBackupWarning } from './settings.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -60,7 +61,7 @@ const say = (id, message) => {
 };
 
 function screen(name) {
-  for (const id of ['setup', 'lock', 'app', 'viewer-screen']) {
+  for (const id of ['setup', 'lock', 'app', 'settings', 'viewer-screen']) {
     if (id === name) show(id); else hide(id);
   }
 }
@@ -77,6 +78,9 @@ function returnToLock() {
   closePicker();
   el('day-detail').innerHTML = '';
   el('share').innerHTML = '';
+  el('episodes').innerHTML = '';
+  el('episode-form-host').innerHTML = '';
+  el('backup-warning').innerHTML = '';
   // His cached copy of her data is held only in memory (viewerShared) and in
   // the DOM this clears — never written anywhere his vault would persist it
   // past the lock.
@@ -242,6 +246,19 @@ async function drawShare() {
     fingerprint: state.key === null ? '' : await fingerprint(state.key),
     ownerUid: state.identity === null ? null : state.identity.uid,
   });
+}
+
+// The settings screen's panes. Called on entry and after every change, so the
+// episode list and the backup warning are never a stale view of the document
+// they describe.
+async function drawSettings() {
+  if (openDoc === null) return;
+  el('episodes').innerHTML = renderEpisodes(openDoc.birthControl);
+  if (el('episode-form-host').innerHTML === '') {
+    el('episode-form-host').innerHTML = renderEpisodeForm({ episode: null, index: null });
+  }
+  el('backup-warning').innerHTML = renderBackupWarning(await readLastBackup(backend), localToday());
+  await drawShare();
 }
 
 // Where a period would have fallen in THIS month, not merely the next one
@@ -1338,6 +1355,22 @@ el('viewer-lock').addEventListener('click', () => {
   vault.lock();
   returnToLock();
 });
+el('go-settings').addEventListener('click', () => {
+  if (openDoc === null) return;
+  screen('settings');
+  drawSettings().catch(() => {});
+});
+
+el('settings-back').addEventListener('click', () => {
+  if (openDoc === null) return;
+  // The form is discarded on the way out rather than kept: a half-typed
+  // episode surviving a trip to the calendar and back would be restored
+  // without its error message or its index, which is how an edit becomes an
+  // accidental add.
+  el('episode-form-host').innerHTML = '';
+  screen('app');
+});
+
 el('export-backup').addEventListener('click', () => { exportBackup(); });
 el('export-data').addEventListener('click', () => { exportPlaintext('data'); });
 el('export-days').addEventListener('click', () => { exportPlaintext('days'); });

@@ -22,6 +22,9 @@
   --positive: #3F8F86;
   --spotting: #A9705B;
   --warning: #B06A1F;
+  --line: #FBCEDC;
+  --warn-bg: #FBE7D3;
+  --warn-ink: #7A4615;
 
   --tap: 44px;
   --radius: 14px;
@@ -39,6 +42,9 @@
     --heading: #F7AFC8;
     --interactive: #E8799C;
     --baseline: #C9B6E4;
+    --line: #3A2630;
+    --warn-bg: #3A2A18;
+    --warn-ink: #F0C49A;
   }
 
   /* #FFFFFF on #E8799C is ~2.76:1 — below the 3:1 bar for UI components.
@@ -483,3 +489,37 @@ input { font-family: var(--font-body); }
 }
 
 .share li button { width: auto; margin: 0; }
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.settings-head h2 { margin: 0; }
+
+.episodes-note,
+.exports-note {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+#episode-list { list-style: none; padding: 0; }
+
+#episode-list li {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.episode-effect {
+  display: block;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.backup-warning {
+  padding: 0.6rem;
+  border-radius: 0.4rem;
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
