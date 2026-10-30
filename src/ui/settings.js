@@ -32,7 +32,10 @@ export function renderEpisodes(birthControl) {
       const when = episode.endedOn === null
         ? `since ${escapeHtml(episode.startedOn)} — still on this`
         : `${escapeHtml(episode.startedOn)} to ${escapeHtml(episode.endedOn)}`;
-      const effect = EFFECT_LABELS[episode.expectedEffect] ?? escapeHtml(episode.expectedEffect);
+      // Raw here — the interpolation site below is the one place this gets
+      // escaped. Escaping twice would garble an out-of-vocabulary effect
+      // into entity text instead of showing it plainly.
+      const effect = EFFECT_LABELS[episode.expectedEffect] ?? episode.expectedEffect;
       const end = episode.endedOn === null
         ? `<button type="button" class="secondary" data-episode-end="${index}">End</button>`
         : '';

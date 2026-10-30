@@ -49,8 +49,16 @@ describe('renderEpisodes', () => {
 
   it('carries the index on every control, so the handler needs no lookup', () => {
     const html = renderEpisodes(episodes);
-    expect(html).toContain('data-episode-edit="0"');
-    expect(html).toContain('data-episode-remove="0"');
+    // Tied to the row, not merely present in the output: display is
+    // newest-first while the index is the position in the array, so a
+    // regression that emitted the post-sort position would still contain
+    // the substring `data-episode-edit="0"` — just on the wrong method.
+    const pillRow = html.slice(html.indexOf('pill'), html.indexOf('implant'));
+    const implantRow = html.slice(html.indexOf('implant'));
+    expect(pillRow).toContain('data-episode-edit="1"');
+    expect(pillRow).toContain('data-episode-remove="1"');
+    expect(implantRow).toContain('data-episode-edit="0"');
+    expect(implantRow).toContain('data-episode-remove="0"');
   });
 
   it('escapes a method name rather than letting it become markup', () => {
@@ -59,6 +67,14 @@ describe('renderEpisodes', () => {
     ]);
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
+  });
+
+  it('escapes an unknown effect exactly once', () => {
+    const html = renderEpisodes([
+      { startedOn: '2015-01-01', endedOn: null, method: 'x', expectedEffect: '<b>odd</b>' },
+    ]);
+    expect(html).toContain('&lt;b&gt;odd&lt;/b&gt;');
+    expect(html).not.toContain('&amp;lt;');
   });
 });
 
