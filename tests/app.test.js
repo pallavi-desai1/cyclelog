@@ -1,5 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 // src/ui/app.js touches `navigator` and `document` at module scope, so it is
@@ -1376,5 +1377,29 @@ describe('the refusal a stale grant produces', () => {
     const body = app();
     expect(body).toMatch(/stopped sharing, or the grant was removed/);
     expect(body).toMatch(/read her your sync id/i);
+  });
+});
+// src/ui/app.js has DOM side effects at import time, so every other test in
+// this file reads it as TEXT — which means nothing in the suite ever asked
+// the JS engine whether it is valid JavaScript. A duplicate `const`
+// introduced during a fix round would have shipped green. `node --check`
+// parses without executing, which is exactly what is needed here.
+describe('every module is valid JavaScript', () => {
+  const modules = [
+    'src/ui/app.js',
+    ...readdirSync(new URL('../src', import.meta.url)).filter(f => f.endsWith('.js')).map(f => `src/${f}`),
+    ...readdirSync(new URL('../src/ui', import.meta.url)).filter(f => f.endsWith('.js')).map(f => `src/ui/${f}`),
+    ...readdirSync(new URL('../src/sync', import.meta.url)).filter(f => f.endsWith('.js')).map(f => `src/sync/${f}`),
+  ];
+
+  it('parses, including the one no test can import', () => {
+    expect(modules).toContain('src/ui/app.js');
+    for (const file of modules) {
+      const result = spawnSync(process.execPath, ['--check', file], {
+        cwd: new URL('..', import.meta.url).pathname,
+        encoding: 'utf8',
+      });
+      expect(result.status, `${file}: ${result.stderr}`).toBe(0);
+    }
   });
 });
