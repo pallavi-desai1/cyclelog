@@ -135,6 +135,26 @@ describe('addEpisode', () => {
     )).toThrow();
   });
 
+  // Its own document rather than doc(): doc() has an open episode, so any
+  // later episode correctly throws now, and a throwing call would prove
+  // nothing about mutation.
+  it('does not mutate the document it was given', () => {
+    const before = {
+      version: 1,
+      days: {},
+      spans: [],
+      gaps: [],
+      birthControl: [
+        { startedOn: '2015-01-01', endedOn: '2015-06-30', method: 'implant', expectedEffect: 'suppress' },
+      ],
+    };
+    const snapshot = JSON.stringify(before);
+    addEpisode(before, {
+      startedOn: '2015-07-01', endedOn: null, method: 'pill', expectedEffect: 'regulate',
+    });
+    expect(JSON.stringify(before)).toBe(snapshot);
+  });
+
   it('leaves her days, spans and gaps untouched', () => {
     const before = {
       version: 1,
