@@ -1016,6 +1016,11 @@ async function exportBackup() {
     );
     await markBackup(backend, localToday());
     await showLastBackup();
+    // The warning above the button is now out of date by definition: she
+    // just did the thing it was asking for. Re-rendered here rather than
+    // only on the next entry to Settings, so the screen does not contradict
+    // the action she just took.
+    el('backup-warning').innerHTML = renderBackupWarning(await readLastBackup(backend), localToday());
   } catch {
     say('export-error', 'That download did not start. Please try again.');
   }

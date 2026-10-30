@@ -1075,8 +1075,15 @@ describe('the settings screen', () => {
     expect((text.match(/id="export-backup"/g) || []).length).toBe(1);
     const settingsAt = text.indexOf('id="settings"');
     expect(settingsAt).toBeGreaterThan(-1);
-    expect(text.indexOf('id="share"')).toBeGreaterThan(settingsAt);
-    expect(text.indexOf('id="export-backup"')).toBeGreaterThan(settingsAt);
+    // Containment, not ordering: #settings appears before #app in the file,
+    // so "after the settings tag" is also true of everything inside #app.
+    // Slice the settings screen out and look inside it.
+    const settingsBlock = text.slice(
+      text.indexOf('<main id="settings"'),
+      text.indexOf('<main', text.indexOf('<main id="settings"') + 5),
+    );
+    expect(settingsBlock).toContain('id="share"');
+    expect(settingsBlock).toContain('id="export-backup"');
   });
 
   it('has somewhere to put the episode list and form', () => {
@@ -1102,6 +1109,15 @@ describe('the settings screen', () => {
     const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
     expect(sw).toContain('src/ui/settings.js');
     expect(sw).toContain('src/episodes-edit.js');
+  });
+
+  it('refreshes the staleness warning after a backup, not only on re-entry', () => {
+    const body = functionBody(app(), 'exportBackup');
+    expect(body, 'exportBackup').not.toBeNull();
+    expect(body).toMatch(/markBackup\(/);
+    const markAt = body.indexOf('markBackup(');
+    const warnAt = body.indexOf('renderBackupWarning(');
+    expect(warnAt).toBeGreaterThan(markAt);
   });
 });
 
