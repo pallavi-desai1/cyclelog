@@ -1139,7 +1139,10 @@ describe('the settings screen', () => {
   it('re-renders the summary after an episode changes, because predictions moved', () => {
     const body = functionBody(app(), 'saveEpisode');
     expect(body, 'saveEpisode').not.toBeNull();
-    expect(body).toMatch(/paint\(\)|drawSummary|openSummary =/);
+    // repaintFromSettings wraps paint() so the repaint happens without also
+    // navigating away from Settings — see "stays on settings after an
+    // episode change" below.
+    expect(body).toMatch(/paint\(\)|drawSummary|openSummary =|repaintFromSettings\(/);
   });
 
   it('tells her what was wrong instead of failing silently', () => {
@@ -1171,6 +1174,25 @@ describe('the settings screen', () => {
 
   it('has a file input for a re-import', () => {
     expect(html()).toContain('id="settings-import"');
+  });
+
+  it('stays on settings after an episode change rather than bouncing home', () => {
+    for (const name of ['saveEpisode', 'endEpisodeAt', 'removeEpisodeAt', 'importMore']) {
+      const body = functionBody(app(), name);
+      expect(body, name).toMatch(/repaintFromSettings\(/);
+      // paint() ends with screen('app'); calling it directly from a settings
+      // handler is what sent her back to the calendar mid-edit.
+      expect(body, name).not.toMatch(/await paint\(\)/);
+    }
+  });
+
+  it('still recomputes the summary an episode change invalidated', () => {
+    const body = functionBody(app(), 'repaintFromSettings');
+    expect(body, 'repaintFromSettings').not.toBeNull();
+    expect(body).toMatch(/await paint\(\)/);
+    const paintAt = body.indexOf('paint()');
+    const screenAt = body.indexOf("screen('settings')");
+    expect(screenAt).toBeGreaterThan(paintAt);
   });
 });
 

@@ -265,6 +265,17 @@ async function drawSettings() {
   await drawShare();
 }
 
+// paint() recomputes the summary and ends by switching to the home screen,
+// which is right for every other caller and wrong here: an episode change
+// has to repaint the summary it invalidated WITHOUT navigating away from
+// the screen she is still working on.
+async function repaintFromSettings() {
+  await paint();
+  if (openDoc === null) return;
+  screen('settings');
+  await drawSettings();
+}
+
 // Reads the form, asks the model to apply it, writes the vault, then repaints.
 // The model is the only thing that decides whether an episode is allowed; this
 // function's job is to report what it said.
@@ -303,9 +314,7 @@ async function saveEpisode() {
   host.innerHTML = '';
   // An episode changes which cycles count as baseline and which adaptation
   // applies, so the summary on the home screen is now wrong until repainted.
-  await paint();
-  if (openDoc === null) return;
-  await drawSettings();
+  await repaintFromSettings();
 }
 
 function editEpisodeAt(index) {
@@ -338,9 +347,7 @@ async function endEpisodeAt(index) {
   }
   if (sessionEpoch !== epoch || openDoc === null) return;
   openDoc = next;
-  await paint();
-  if (openDoc === null) return;
-  await drawSettings();
+  await repaintFromSettings();
 }
 
 async function removeEpisodeAt(index) {
@@ -365,9 +372,7 @@ async function removeEpisodeAt(index) {
   }
   if (sessionEpoch !== epoch || openDoc === null) return;
   openDoc = next;
-  await paint();
-  if (openDoc === null) return;
-  await drawSettings();
+  await repaintFromSettings();
 }
 
 // A later export merged into what is already here. Replacing would throw away
@@ -391,9 +396,7 @@ async function importMore(files) {
     if (sessionEpoch !== epoch || openDoc === null) return;
     openDoc = merged;
     say('settings-import-notice', describeImport({ doc: merged, warnings: incoming.warnings }));
-    await paint();
-    if (openDoc === null) return;
-    await drawSettings();
+    await repaintFromSettings();
   } catch {
     say('settings-import-notice', 'Those files could not be read.');
   }
