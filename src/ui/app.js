@@ -1272,15 +1272,21 @@ async function paintViewer() {
       const summary = buildSummary(doc, localToday());
       viewerSummary = summary;
       // Only on first paint, or after a lock: a refresh must not yank him
-      // back to this month when he was reading an earlier one.
+      // back to this month when he was reading an earlier one. Re-clamped
+      // every time though, not just when stepping: a month that was in range
+      // can fall out of it when she narrows the scope (the `dates` scope
+      // carries no days at all), and from outside the range both arrows
+      // clamp to the same end, so Previous moved him forward by years.
       if (viewerMonth === null) viewerMonth = monthOf(localToday());
+      viewerMonth = clampMonth(viewerMonth, monthRange(doc, localToday()));
       el('viewer').innerHTML = renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid })
         + renderSummary(summary);
-      drawViewerCalendar();
     }
-    // After the pane is replaced: a refresh must not silently drop the day he
-    // had open, and must not leave a stale card under a header that now says
-    // nothing was received.
+    // Outside the branch, beside drawViewerDay and for the same reason: both
+    // self-clear, and his calendar is no longer inside #viewer's innerHTML,
+    // so the "her copy is gone" branch would otherwise leave her month grid
+    // on screen under a header saying nothing was received.
+    drawViewerCalendar();
     drawViewerDay();
     screen('viewer-screen');
   } finally {

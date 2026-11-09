@@ -1602,6 +1602,52 @@ describe('the viewer mode', () => {
     expect(marker).not.toMatch(/el\('viewer'\)/);
   });
 
+  // Introduced by the month-navigation fix: moving his grid into a sibling
+  // element meant it stopped being covered by #viewer's single innerHTML
+  // assignment, so the branch that handles "her copy is gone" no longer
+  // cleared it. She revokes his access, he taps Refresh, the header blanks
+  // and the error says sharing stopped — and her month grid, period days and
+  // all, stays on screen under a frozen month label.
+  it('clears his calendar when her shared copy is gone, not just when it is there', () => {
+    const body = functionBody(app(), 'paintViewer');
+    const start = body.indexOf('if (viewerShared === null) {');
+    expect(start, 'the viewerShared === null branch').toBeGreaterThan(-1);
+
+    // Brace-match the whole if/else so the assertion is about structure
+    // rather than proximity: a first attempt at this test compared character
+    // distances and stayed green when the call was moved back inside the
+    // else, which is the exact regression it exists to catch.
+    let depth = 0;
+    let end = -1;
+    for (let at = body.indexOf('{', start); at < body.length; at += 1) {
+      if (body[at] === '{') depth += 1;
+      if (body[at] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const rest = body.slice(at + 1);
+          // Step over `} else {` to keep matching the same statement.
+          const next = rest.match(/^\s*else\s*\{/);
+          if (next === null) { end = at; break; }
+          at += next[0].length;
+          depth = 1;
+        }
+      }
+    }
+    expect(end, 'the end of the if/else').toBeGreaterThan(start);
+    const insideBranches = body.slice(start, end);
+    const afterBranches = body.slice(end);
+    expect(insideBranches).not.toMatch(/drawViewerCalendar\(\)/);
+    expect(afterBranches).toMatch(/drawViewerCalendar\(\)/);
+  });
+
+  it('clamps the month he comes back to, not only the ones he steps to', () => {
+    // A month that was in range can fall out of it when she narrows the
+    // scope, and from outside the range both arrows clamp to the same end —
+    // so Previous moved him forward by years.
+    const body = functionBody(app(), 'paintViewer');
+    expect(body).toMatch(/clampMonth\(/);
+  });
+
   it('clears his month panes on lock like every other pane', () => {
     const helper = functionBody(app(), 'returnToLock');
     expect(helper).toMatch(/viewer-calendar'\)\.innerHTML = ''/);
