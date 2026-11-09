@@ -3,7 +3,7 @@
 // opening another needs no migration and no code change. These are the
 // operations Settings exposes. Pure functions over the document, like
 // src/edit.js is for days — no DOM, no storage, no clock.
-import { parseISO } from './dates.js';
+import { parseISO, addDays } from './dates.js';
 
 // The three the prediction prior in src/episodes.js knows (SIGMA_BY_EFFECT).
 // Any other value would fall back to the widest prior silently, so it is
@@ -108,4 +108,46 @@ export function removeEpisode(doc, index) {
   const existing = doc.birthControl ?? [];
   if (existing[index] === undefined) throw new Error('there is no episode there');
   return withEpisodes(doc, existing.filter((_, at) => at !== index));
+}
+
+// What a method change actually is (spec §3.1): close one episode, open the
+// next. Doing it as two separate edits means picking the dates so they do not
+// overlap — end on the 5th and start on the 5th is what a person means by "I
+// changed on the 5th", and it is precisely what the overlap rule refuses. So
+// this takes the one date she knows and derives both halves: the new method
+// starts that day, the old one ends the day before.
+export function switchMethod(doc, { changedOn, method, expectedEffect }) {
+  if (!isRealDate(changedOn ?? '')) throw new Error('Give the date you changed, as a real date.');
+  const name = (method ?? '').trim();
+  if (name === '') throw new Error('Name the method you changed to.');
+  if (!EFFECTS.includes(expectedEffect)) {
+    throw new Error('Choose what effect the new method is expected to have.');
+  }
+
+  const existing = doc.birthControl ?? [];
+  const openIndex = existing.findIndex(episode => episode.endedOn === null);
+
+  // Nothing open: she was on nothing, so this is simply a start.
+  if (openIndex === -1) {
+    return addEpisode(doc, { startedOn: changedOn, endedOn: null, method: name, expectedEffect });
+  }
+
+  const open = existing[openIndex];
+  // One day is the smallest episode this can produce; a change on or before
+  // the day the old method started is not a change, it is a correction, and
+  // Edit is where that belongs.
+  if (changedOn <= open.startedOn) {
+    throw new Error(
+      `You started the ${open.method} on ${open.startedOn}, so the change has to be after that. `
+      + 'Use Edit to correct that date instead.',
+    );
+  }
+
+  const closed = updateEpisode(doc, openIndex, {
+    ...open,
+    endedOn: addDays(changedOn, -1),
+  });
+  return addEpisode(closed, {
+    startedOn: changedOn, endedOn: null, method: name, expectedEffect,
+  });
 }

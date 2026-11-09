@@ -561,3 +561,16 @@ input { font-family: var(--font-body); }
   flex: 1;
   text-align: center;
 }
+
+/* The change-method form sits between the list and the add/edit form, so it
+   needs a seam of its own or the card reads as one long run of inputs. */
+#switch-form {
+  margin-top: var(--gap);
+  padding-top: var(--gap);
+  border-top: 1px solid var(--border);
+}
+
+#switch-form h4,
+#end-form h4 { margin: 0 0 0.4em; color: var(--heading); }
+
+.switch-note { font-size: 0.9rem; opacity: 0.8; margin: 0 0 0.6em; }

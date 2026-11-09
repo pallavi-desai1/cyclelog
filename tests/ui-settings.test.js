@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   EFFECT_LABELS, renderEpisodes, renderEpisodeForm, renderBackupWarning,
+  renderSwitchForm, renderEndForm,
 } from '../src/ui/settings.js';
 import { EFFECTS } from '../src/episodes-edit.js';
 
@@ -132,5 +133,84 @@ describe('renderBackupWarning', () => {
   it('does not warn on the thirtieth day, only after it', () => {
     expect(renderBackupWarning('2015-02-24', '2015-03-26')).toBe('');
     expect(renderBackupWarning('2015-02-23', '2015-03-26')).not.toBe('');
+  });
+});
+
+describe('renderSwitchForm', () => {
+  it('asks for the one date she knows: when she changed', () => {
+    const html = renderSwitchForm({ current: null, todayISO: '2015-11-05' });
+    expect(html).toContain('id="switch-date"');
+    expect(html).toContain('id="switch-method"');
+    expect(html).toContain('id="switch-effect"');
+    expect(html).toContain('id="switch-save"');
+    expect(html).toMatch(/type="date"/);
+  });
+
+  it('defaults the date to today, since that is when most changes get logged', () => {
+    expect(renderSwitchForm({ current: null, todayISO: '2015-11-05' }))
+      .toContain('value="2015-11-05"');
+  });
+
+  it('names the method it will close, so she can see what will happen', () => {
+    const html = renderSwitchForm({
+      current: { startedOn: '2015-02-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+      todayISO: '2015-11-05',
+    });
+    expect(html).toContain('pill');
+  });
+
+  it('offers every effect and hardcodes no method name', () => {
+    const html = renderSwitchForm({ current: null, todayISO: '2015-11-05' });
+    for (const effect of EFFECTS) expect(html).toContain(`value="${effect}"`);
+    expect(html).not.toMatch(/implant|pill|IUD/i);
+  });
+
+  it('escapes the current method name rather than letting it become markup', () => {
+    const html = renderSwitchForm({
+      current: { startedOn: '2015-02-01', endedOn: null, method: '<img src=x>', expectedEffect: 'none' },
+      todayISO: '2015-11-05',
+    });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+  });
+
+  it('prints no null when she is on nothing', () => {
+    expect(renderSwitchForm({ current: null, todayISO: '2015-11-05' }))
+      .not.toMatch(/null|undefined|NaN/);
+  });
+});
+
+describe('renderEndForm', () => {
+  // Replaces a window.prompt. The end date was the one date in this app she
+  // had to type as free text, on a phone, with no picker.
+  it('takes the end date through a date input, not free text', () => {
+    const html = renderEndForm({
+      episode: { startedOn: '2015-02-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+      index: 0,
+      todayISO: '2015-11-05',
+    });
+    expect(html).toContain('id="end-date"');
+    expect(html).toMatch(/<input id="end-date" type="date"/);
+    expect(html).toContain('data-end-index="0"');
+    expect(html).toContain('id="end-save"');
+    expect(html).toContain('id="end-cancel"');
+  });
+
+  it('says which method it is ending and defaults to today', () => {
+    const html = renderEndForm({
+      episode: { startedOn: '2015-02-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+      index: 0,
+      todayISO: '2015-11-05',
+    });
+    expect(html).toContain('pill');
+    expect(html).toContain('value="2015-11-05"');
+  });
+
+  it('survives index 0 without losing it', () => {
+    expect(renderEndForm({
+      episode: { startedOn: '2015-02-01', endedOn: null, method: 'x', expectedEffect: 'none' },
+      index: 0,
+      todayISO: '2015-11-05',
+    })).toContain('data-end-index="0"');
   });
 });

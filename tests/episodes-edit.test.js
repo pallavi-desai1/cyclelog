@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   EFFECTS, validateEpisode, addEpisode, updateEpisode, endEpisode, removeEpisode,
+  switchMethod,
 } from '../src/episodes-edit.js';
 
 const doc = () => ({
@@ -216,5 +217,106 @@ describe('removeEpisode', () => {
     const snapshot = JSON.stringify(before);
     removeEpisode(before, 0);
     expect(JSON.stringify(before)).toBe(snapshot);
+  });
+});
+
+describe('switchMethod', () => {
+  const onPill = () => ({
+    version: 1, days: {}, spans: [], gaps: [],
+    birthControl: [
+      { startedOn: '2015-02-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+    ],
+  });
+
+  // The whole point of this function. Ending the old one and starting the new
+  // one on the same date is what a person means by "I changed on the 5th",
+  // and it is exactly what the overlap rule refuses — so doing it by hand
+  // means working out an off-by-one yourself. One date in, both halves
+  // consistent out.
+  it('closes the method she was on and opens the new one from that date', () => {
+    const after = switchMethod(onPill(), {
+      changedOn: '2015-11-05', method: 'copper IUD', expectedEffect: 'none',
+    });
+    expect(after.birthControl).toEqual([
+      { startedOn: '2015-02-01', endedOn: '2015-11-04', method: 'pill', expectedEffect: 'regulate' },
+      { startedOn: '2015-11-05', endedOn: null, method: 'copper IUD', expectedEffect: 'none' },
+    ]);
+  });
+
+  it('produces a document the overlap rule accepts', () => {
+    const after = switchMethod(onPill(), {
+      changedOn: '2015-11-05', method: 'copper IUD', expectedEffect: 'none',
+    });
+    for (const [index, episode] of after.birthControl.entries()) {
+      expect(validateEpisode(episode, { existing: after.birthControl, ignoreIndex: index }), episode.method).toBeNull();
+    }
+  });
+
+  it('works when she was on nothing, as a plain start', () => {
+    const after = switchMethod(
+      { version: 1, days: {}, spans: [], gaps: [], birthControl: [] },
+      { changedOn: '2015-11-05', method: 'pill', expectedEffect: 'regulate' },
+    );
+    expect(after.birthControl).toEqual([
+      { startedOn: '2015-11-05', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+    ]);
+  });
+
+  it('refuses a change date on or before the method it would close', () => {
+    expect(() => switchMethod(onPill(), {
+      changedOn: '2015-02-01', method: 'x', expectedEffect: 'none',
+    })).toThrow(/after/i);
+    expect(() => switchMethod(onPill(), {
+      changedOn: '2015-01-01', method: 'x', expectedEffect: 'none',
+    })).toThrow(/after/i);
+  });
+
+  it('refuses a change date that is not a real date, and names the problem', () => {
+    expect(() => switchMethod(onPill(), {
+      changedOn: '2015-02-30', method: 'x', expectedEffect: 'none',
+    })).toThrow(/date/i);
+    expect(() => switchMethod(onPill(), {
+      changedOn: '', method: 'x', expectedEffect: 'none',
+    })).toThrow(/date/i);
+  });
+
+  it('refuses an unnamed method rather than recording a blank one', () => {
+    expect(() => switchMethod(onPill(), {
+      changedOn: '2015-11-05', method: '   ', expectedEffect: 'none',
+    })).toThrow(/method/i);
+  });
+
+  it('leaves a closed history alone and only touches the open episode', () => {
+    const before = {
+      version: 1, days: {}, spans: [], gaps: [],
+      birthControl: [
+        { startedOn: '2015-01-01', endedOn: '2015-01-31', method: 'implant', expectedEffect: 'suppress' },
+        { startedOn: '2015-02-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+      ],
+    };
+    const after = switchMethod(before, {
+      changedOn: '2015-11-05', method: 'copper IUD', expectedEffect: 'none',
+    });
+    expect(after.birthControl[0]).toEqual(before.birthControl[0]);
+    expect(after.birthControl).toHaveLength(3);
+  });
+
+  it('does not mutate the document it was given', () => {
+    const before = onPill();
+    const snapshot = JSON.stringify(before);
+    switchMethod(before, { changedOn: '2015-11-05', method: 'x', expectedEffect: 'none' });
+    expect(JSON.stringify(before)).toBe(snapshot);
+  });
+
+  it('leaves her days and spans untouched', () => {
+    const before = {
+      version: 1, gaps: [],
+      days: { '2015-03-20': { flow: 'heavy', source: 'manual' } },
+      spans: [{ start: '2015-03-20', end: '2015-03-24' }],
+      birthControl: [],
+    };
+    const after = switchMethod(before, { changedOn: '2015-11-05', method: 'x', expectedEffect: 'none' });
+    expect(after.days).toEqual(before.days);
+    expect(after.spans).toEqual(before.spans);
   });
 });

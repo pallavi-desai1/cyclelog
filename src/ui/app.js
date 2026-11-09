@@ -39,9 +39,11 @@ import {
 import { viewerRecord, parseViewerRecord, isViewerRecord, fetchShared } from '../sync/viewer.js';
 import { renderViewerHeader } from './viewer.js';
 import { FIREBASE } from '../config.js';
-import { renderEpisodes, renderEpisodeForm, renderBackupWarning } from './settings.js';
 import {
-  addEpisode, updateEpisode, endEpisode, removeEpisode,
+  renderEpisodes, renderEpisodeForm, renderBackupWarning, renderSwitchForm, renderEndForm,
+} from './settings.js';
+import {
+  addEpisode, updateEpisode, endEpisode, removeEpisode, switchMethod,
 } from '../episodes-edit.js';
 import { mergeIntoDocument, mergeConflicts } from '../merge.js';
 
@@ -83,6 +85,7 @@ function returnToLock() {
   el('day-detail').innerHTML = '';
   el('share').innerHTML = '';
   el('episodes').innerHTML = '';
+  el('switch-form-host').innerHTML = '';
   el('episode-form-host').innerHTML = '';
   el('backup-warning').innerHTML = '';
   // His cached copy of her data is held only in memory (viewerShared) and in
@@ -285,6 +288,12 @@ async function drawShare() {
 async function drawSettings() {
   if (openDoc === null) return;
   el('episodes').innerHTML = renderEpisodes(openDoc.birthControl);
+  // Rebuilt on every draw so the method it offers to close is the current
+  // one, not whichever was open when the screen was first opened.
+  el('switch-form-host').innerHTML = renderSwitchForm({
+    current: (openDoc.birthControl ?? []).find(episode => episode.endedOn === null) ?? null,
+    todayISO: localToday(),
+  });
   if (el('episode-form-host').innerHTML === '') {
     el('episode-form-host').innerHTML = renderEpisodeForm({ episode: null, index: null });
   }
@@ -393,29 +402,49 @@ function editEpisodeAt(index) {
   el('episode-form-host').innerHTML = renderEpisodeForm({ episode, index });
 }
 
-async function endEpisodeAt(index) {
+// Opens a date picker instead of asking her to type a date into a prompt.
+// The write itself happens in saveEndDate, so ending a method goes through
+// the same guarded path as every other settings write.
+function endEpisodeAt(index) {
   if (openDoc === null) return;
   const episode = (openDoc.birthControl ?? [])[index];
   if (episode === undefined) return;
-  const when = window.prompt(`What date did the ${episode.method} end?`, localToday());
-  if (when === null) return;
-  // An empty answer is a mistake, not a value: clean() maps it back to null,
-  // which writes a document identical to the current one and tells her
-  // nothing while the episode stays open.
-  if (when.trim() === '') return say('episode-error', 'Give the date it ended.');
+  el('episode-form-host').innerHTML = renderEndForm({
+    episode, index, todayISO: localToday(),
+  });
+}
 
+async function switchMethodNow() {
+  if (openDoc === null) return;
   let next;
   try {
-    next = endEpisode(openDoc, index, when);
+    next = switchMethod(openDoc, {
+      changedOn: el('switch-date').value,
+      method: el('switch-method').value,
+      expectedEffect: el('switch-effect').value,
+    });
   } catch (error) {
-    say('episode-error', error.message);
-    return;
+    return say('switch-error', error.message);
   }
-  const ok = await saveSettingsDoc(next, 'episode-error');
-  if (ok === false || openDoc === null) return;
-  // An edit form left open across this write remembers an index into
-  // positions that have just moved, so saving it would land on a different
-  // episode than the one on screen.
+  const ok = await saveSettingsDoc(next, 'switch-error');
+  if (!ok) return;
+  el('episode-form-host').innerHTML = '';
+  await repaintFromSettings();
+}
+
+async function saveEndDate() {
+  if (openDoc === null) return;
+  const form = document.getElementById('end-form');
+  if (form === null) return;
+  const index = Number(form.dataset.endIndex);
+  let next;
+  try {
+    next = endEpisode(openDoc, index, el('end-date').value);
+  } catch (error) {
+    return say('end-error', error.message);
+  }
+  const ok = await saveSettingsDoc(next, 'end-error');
+  if (!ok) return;
   el('episode-form-host').innerHTML = '';
   await repaintFromSettings();
 }
@@ -1855,7 +1884,13 @@ el('export-data').addEventListener('click', () => { exportPlaintext('data'); });
 el('export-days').addEventListener('click', () => { exportPlaintext('days'); });
 el('export-cycles').addEventListener('click', () => { exportPlaintext('cycles'); });
 
+el('switch-form-host').addEventListener('click', (event) => {
+  if (event.target.id === 'switch-save') switchMethodNow().catch(() => {});
+});
+
 el('episode-form-host').addEventListener('click', (event) => {
+  if (event.target.id === 'end-save') saveEndDate().catch(() => {});
+  if (event.target.id === 'end-cancel') el('episode-form-host').innerHTML = '';
   if (event.target.id === 'episode-save') saveEpisode().catch(() => {});
   if (event.target.id === 'episode-cancel') {
     el('episode-form-host').innerHTML = renderEpisodeForm({ episode: null, index: null });
@@ -1867,7 +1902,7 @@ el('episodes').addEventListener('click', (event) => {
   const end = event.target.dataset.episodeEnd;
   const remove = event.target.dataset.episodeRemove;
   if (edit !== undefined) editEpisodeAt(Number(edit));
-  if (end !== undefined) endEpisodeAt(Number(end)).catch(() => {});
+  if (end !== undefined) endEpisodeAt(Number(end));
   if (remove !== undefined) removeEpisodeAt(Number(remove)).catch(() => {});
 });
 

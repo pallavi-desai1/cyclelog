@@ -117,6 +117,8 @@ describe('app wiring', () => {
       'renderDay(dayDetail(viewerShared.doc, viewerDate, { todayISO: localToday(), adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date, baselineDates: [], }), { canEdit: false })',
       'renderEpisodes(openDoc.birthControl)',
       'renderEpisodeForm({ episode: null, index: null })',
+      'renderSwitchForm({ current: (openDoc.birthControl ?? []).find(episode => episode.endedOn === null) ?? null, todayISO: localToday(), })',
+      'renderEndForm({ episode, index, todayISO: localToday(), })',
       'renderEpisodeForm({ episode, index })',
       'renderBackupWarning(await readLastBackup(backend), localToday())',
     ];
@@ -232,7 +234,7 @@ describe('idle locking', () => {
     const helper = functionBody(text, 'returnToLock');
     const inHelper = (helper.match(/innerHTML = ''/g) || []).length;
     const everywhere = (text.match(/innerHTML = ''/g) || []).length;
-    expect(inHelper).toBe(10);             // the summary, the calendar, the day panel, the share card, his viewer pane, his calendar, his day panel, the episode list, the episode form host and the backup warning
+    expect(inHelper).toBe(11);             // the summary, the calendar, the day panel, the share card, his viewer pane, his calendar, his day panel, the episode list, the change-method form host, the episode form host and the backup warning
     expect(helper).toMatch(/closePicker\(\)/);   // the picker, through its own helper
     // Those six are the only sites that clear rendered markup, so there is
     // exactly one place that can forget a pane.
@@ -247,12 +249,16 @@ describe('idle locking', () => {
     // stale index overwrote a different episode than the one on screen.
     // +8 now, not +7: repaintFromSettings clears the day panel, which would
     // otherwise go on showing predictions computed before the episode change.
-    // +9 now, not +8: drawViewerCalendar clears his calendar when there is no
-    // shared copy or no month, the same self-clear every other draw helper
-    // does. The nine outside returnToLock are repaintFromSettings,
-    // saveEpisode, endEpisodeAt, removeEpisodeAt, importMore,
-    // drawViewerCalendar, drawViewerDay, closePicker and start.
-    expect(everywhere).toBe(inHelper + 9);
+    // +11 now, not +9: recording a method change and ending one each clear
+    // the episode form host after their write (its remembered index refers
+    // to positions that have just moved), and the end form's Cancel clears
+    // it too. endEpisodeAt no longer clears anything — it renders the date
+    // form rather than writing. The eleven outside returnToLock are
+    // repaintFromSettings, saveEpisode, saveEndDate, switchMethodNow,
+    // removeEpisodeAt, importMore, the episode-form-host Cancel listener,
+    // the settings-back listener, closePicker, drawViewerCalendar and
+    // drawViewerDay.
+    expect(everywhere).toBe(inHelper + 11);
   });
 });
 
@@ -1173,6 +1179,32 @@ describe('the settings screen', () => {
     expect(warnAt).toBeGreaterThan(markAt);
   });
 
+  // She asked for this directly: the section must let her put in the date she
+  // changed method. It already had Started on / Ended on, but recording a
+  // change meant two edits whose dates the overlap rule would reject if given
+  // the obvious answer, and the end date went through a typed prompt.
+  it('has a place to record the date she changed method', () => {
+    expect(html()).toContain('id="switch-form-host"');
+    const body = functionBody(app(), 'drawSettings');
+    expect(body).toMatch(/renderSwitchForm\(/);
+  });
+
+  it('records a change through the guarded model function, in one write', () => {
+    const body = functionBody(app(), 'switchMethodNow');
+    expect(body, 'switchMethodNow').not.toBeNull();
+    expect(body).toMatch(/switchMethod\(/);
+    expect(body).toMatch(/saveSettingsDoc\(/);
+    expect(body).toMatch(/switch-error/);
+  });
+
+  it('takes the end date from a date input rather than a typed prompt', () => {
+    const body = app();
+    // window.prompt was the only free-text date entry left in the app.
+    expect(functionBody(body, 'endEpisodeAt')).not.toMatch(/window\.prompt/);
+    expect(body).toMatch(/renderEndForm\(/);
+    expect(functionBody(body, 'saveEndDate')).toMatch(/endEpisode\(/);
+  });
+
   it('saves an episode through the guarded model functions, not by hand', () => {
     const body = app();
     expect(body).toMatch(/addEpisode\(/);
@@ -1206,7 +1238,7 @@ describe('the settings screen', () => {
   });
 
   it('guards every settings write against a lock arriving mid-save', () => {
-    for (const name of ['saveEpisode', 'endEpisodeAt', 'removeEpisodeAt', 'importMore']) {
+    for (const name of ['saveEpisode', 'saveEndDate', 'switchMethodNow', 'removeEpisodeAt', 'importMore']) {
       const body = functionBody(app(), name);
       expect(body, name).not.toBeNull();
       // The guard that matters is the one AFTER the write resolves. Slicing
@@ -1237,7 +1269,7 @@ describe('the settings screen', () => {
   });
 
   it('stays on settings after an episode change rather than bouncing home', () => {
-    for (const name of ['saveEpisode', 'endEpisodeAt', 'removeEpisodeAt', 'importMore']) {
+    for (const name of ['saveEpisode', 'saveEndDate', 'switchMethodNow', 'removeEpisodeAt', 'importMore']) {
       const body = functionBody(app(), name);
       expect(body, name).toMatch(/repaintFromSettings\(/);
       // paint() ends with screen('app'); calling it directly from a settings

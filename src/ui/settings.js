@@ -18,6 +18,11 @@ export const EFFECT_LABELS = {
 // how long it has actually been rather than nagging without information.
 export const BACKUP_STALE_DAYS = 30;
 
+const effectOptions = (selected) => EFFECTS.map((effect) => {
+  const chosen = selected === effect ? ' selected' : '';
+  return `<option value="${effect}"${chosen}>${escapeHtml(EFFECT_LABELS[effect])}</option>`;
+}).join('');
+
 export function renderEpisodes(birthControl) {
   const episodes = birthControl ?? [];
   if (episodes.length === 0) {
@@ -53,10 +58,7 @@ export function renderEpisodes(birthControl) {
 
 export function renderEpisodeForm({ episode = null, index = null } = {}) {
   const value = field => (episode === null ? '' : escapeHtml(episode[field] ?? ''));
-  const options = EFFECTS.map(effect => {
-    const selected = episode !== null && episode.expectedEffect === effect ? ' selected' : '';
-    return `<option value="${effect}"${selected}>${escapeHtml(EFFECT_LABELS[effect])}</option>`;
-  }).join('');
+  const options = effectOptions(episode === null ? null : episode.expectedEffect);
 
   return [
     `<div id="episode-form" data-episode-index="${index === null ? '' : index}">`,
@@ -84,4 +86,46 @@ export function renderBackupWarning(lastBackup, todayISO) {
   if (age <= BACKUP_STALE_DAYS) return '';
   return `<p class="backup-warning">Your last backup was ${escapeHtml(String(age))} days ago. `
     + 'Download a fresh one.</p>';
+}
+
+// The common case, as one action. A method change is two edits to the model
+// (spec §3.1) but one fact to her: a date. Asking for both halves separately
+// means she has to pick dates the overlap rule will accept, and the natural
+// answer — ended the 5th, started the 5th — is the one it refuses.
+export function renderSwitchForm({ current = null, todayISO }) {
+  const closing = current === null
+    ? '<p class="switch-note">You are not recording a method at the moment, so this just starts one.</p>'
+    : `<p class="switch-note">This ends the ${escapeHtml(current.method)} the day before, `
+      + 'and starts the new one on the date you give.</p>';
+
+  return [
+    '<div id="switch-form">',
+    '<h4>I changed method</h4>',
+    closing,
+    '<label for="switch-date">Date you changed</label>',
+    `<input id="switch-date" type="date" value="${escapeHtml(todayISO)}">`,
+    '<label for="switch-method">New method</label>',
+    '<input id="switch-method" type="text">',
+    '<label for="switch-effect">What it does to your cycle</label>',
+    `<select id="switch-effect">${effectOptions(null)}</select>`,
+    '<button id="switch-save" type="button">Record the change</button>',
+    '<p id="switch-error" role="alert"></p>',
+    '</div>',
+  ].join('');
+}
+
+// Stopping without starting anything else. Replaces a window.prompt: the end
+// date was the one date in this app she had to type as free text, on a phone,
+// with no picker and no validation until after she pressed go.
+export function renderEndForm({ episode, index, todayISO }) {
+  return [
+    `<div id="end-form" data-end-index="${index}">`,
+    `<h4>End the ${escapeHtml(episode.method)}</h4>`,
+    '<label for="end-date">Date it ended</label>',
+    `<input id="end-date" type="date" value="${escapeHtml(todayISO)}">`,
+    '<button id="end-save" type="button">Save</button>',
+    '<button id="end-cancel" type="button" class="secondary">Cancel</button>',
+    '<p id="end-error" role="alert"></p>',
+    '</div>',
+  ].join('');
 }
