@@ -64,6 +64,34 @@ export async function writeMeta(backend, meta) {
   await backend.set(META_KEY, meta);
 }
 
+// Meta is read-modify-write from four places (the passphrase re-wrap, the
+// Face ID wrapping, the credential id, the backup date) and two of them sit
+// on one screen. Interleaving them loses whichever field the slower one had
+// not read yet: a backup taken during a passphrase change's PBKDF2 reverted
+// lastBackupAt while the screen said today, which suppresses the staleness
+// warning that is the whole mitigation for a forgotten passphrase. Every
+// mutation queues here, so a reader always sees the result of the write
+// before it.
+//
+// `mutate` is given the current meta (possibly null) and returns the meta to
+// store; returning null or undefined writes nothing.
+let metaQueue = Promise.resolve();
+
+export function mutateMeta(backend, mutate) {
+  const run = metaQueue.then(async () => {
+    const meta = await readMeta(backend);
+    const next = await mutate(meta);
+    if (next === null || next === undefined) return;
+    await writeMeta(backend, next);
+  });
+  // The queue follows this run but swallows its failure, while the caller
+  // gets `run` itself. A rejected tail would make every later mutation take
+  // the rejection path and skip its own work — the queue must not be
+  // poisoned, and a failed passphrase change must still be reported.
+  metaQueue = run.then(() => {}, () => {});
+  return run;
+}
+
 export async function saveDocument(backend, key, documentString) {
   const sealed = await seal(key, documentString);
   // One replace, never delete-then-put: an interrupted delete-then-put would

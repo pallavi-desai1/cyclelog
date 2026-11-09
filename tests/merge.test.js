@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { mergeSources, mergeIntoDocument, mergeConflicts, MERGE_DAY_FIELDS } from '../src/merge.js';
+import {
+  mergeSources, mergeIntoDocument, mergeConflicts, describeConflicts, MERGE_DAY_FIELDS,
+} from '../src/merge.js';
+import { validateEpisode } from '../src/episodes-edit.js';
 import { parseDocument, serializeDocument } from '../src/import.js';
 import { blankDay } from '../src/importers/clue.js';
 
@@ -261,5 +264,130 @@ describe('mergeConflicts', () => {
 
   it('reports nothing when a re-import changes nothing', () => {
     expect(mergeConflicts(openWithEndedEpisode(), openWithEndedEpisode())).toEqual([]);
+  });
+});
+
+// Finding B. The Settings re-import does not merge birth control at all: it
+// puts her own section back over the merge result. These tests execute both
+// halves — what mergeIntoDocument alone produces, which is why the rule
+// exists, and what the rule produces instead.
+describe('the Settings re-import rule for birth control', () => {
+  const hers = () => ({
+    version: 1,
+    days: {}, spans: [], gaps: [],
+    birthControl: [
+      { method: 'implant', startedOn: '2015-01-05', endedOn: '2015-06-01', expectedEffect: 'suppress' },
+      { method: 'pill', startedOn: '2015-06-02', endedOn: null, expectedEffect: 'regulate' },
+    ],
+  });
+  // What an export carries: every episode still open, because the importer
+  // has no end date to give it.
+  const incoming = () => ({
+    version: 1,
+    days: { '2015-02-01': { ...blankDay('clue') } }, spans: [], gaps: [],
+    birthControl: [{ method: 'implant', startedOn: '2015-01-05', endedOn: null, expectedEffect: 'suppress' }],
+  });
+
+  const openCount = episodes => episodes.filter(episode => episode.endedOn === null).length;
+
+  it('mergeIntoDocument alone WOULD leave two open episodes', () => {
+    const merged = mergeIntoDocument(hers(), incoming());
+    expect(merged.birthControl).toHaveLength(2);
+    expect(openCount(merged.birthControl)).toBe(2);
+    // And the older of the two is the one the model resolves to, which is how
+    // every prediction ended up following the method she had ended.
+    expect(merged.birthControl[0].method).toBe('implant');
+    expect(merged.birthControl[0].endedOn).toBeNull();
+  });
+
+  it('the model rejects the shape mergeIntoDocument alone produces', () => {
+    const merged = mergeIntoDocument(hers(), incoming());
+    const problems = merged.birthControl.map((episode, index) => validateEpisode(
+      episode, { existing: merged.birthControl, ignoreIndex: index },
+    ));
+    expect(problems.some(problem => problem !== null)).toBe(true);
+  });
+
+  it('restoring her own section leaves exactly one open episode', () => {
+    const openDoc = hers();
+    const merged = mergeIntoDocument(openDoc, incoming());
+    const kept = { ...merged, birthControl: openDoc.birthControl ?? [] };
+    expect(openCount(kept.birthControl)).toBe(1);
+    expect(kept.birthControl.find(episode => episode.endedOn === null).method).toBe('pill');
+    // Her hand-set end date survives.
+    expect(kept.birthControl[0].endedOn).toBe('2015-06-01');
+    // And the rest of the import still landed.
+    expect(Object.keys(kept.days)).toEqual(['2015-02-01']);
+  });
+
+  it('leaves the kept document in a shape the model accepts', () => {
+    const openDoc = hers();
+    const merged = mergeIntoDocument(openDoc, incoming());
+    const kept = { ...merged, birthControl: openDoc.birthControl ?? [] };
+    for (const [index, episode] of kept.birthControl.entries()) {
+      expect(validateEpisode(episode, { existing: kept.birthControl, ignoreIndex: index })).toBeNull();
+    }
+  });
+});
+
+// Finding D. The sentence used to say "N entries differed and the imported
+// version was kept — check your birth control dates". Her own entries win,
+// no birth-control date is involved, and the count was of fields.
+describe('describeConflicts', () => {
+  const manualDay = fields => ({ ...blankDay('manual'), ...fields });
+  const clueDay = fields => ({ ...blankDay('clue'), ...fields });
+
+  const twoFieldsOneDay = () => mergeConflicts(
+    { version: 1, days: { '2015-03-04': manualDay({ flow: 'light', cramps: 'mild' }) }, spans: [], gaps: [], birthControl: [] },
+    { version: 1, days: { '2015-03-04': clueDay({ flow: 'heavy', cramps: 'severe' }) }, spans: [], gaps: [], birthControl: [] },
+  );
+
+  it('counts days, not fields', () => {
+    const conflicts = twoFieldsOneDay();
+    expect(conflicts.length).toBe(2);
+    expect(describeConflicts(conflicts)).toContain('1 day');
+    expect(describeConflicts(conflicts)).not.toContain('2 entries');
+    expect(describeConflicts(conflicts)).not.toContain('2 days');
+  });
+
+  it('says her own entries were kept, which is what the merge did', () => {
+    const conflicts = twoFieldsOneDay();
+    // The merge really did keep hers: `manual` outranks `clue`.
+    for (const conflict of conflicts) {
+      expect(['light', 'mild']).toContain(conflict.kept);
+    }
+    const sentence = describeConflicts(conflicts);
+    expect(sentence).toContain('your own entries were kept');
+    expect(sentence).not.toMatch(/imported version/);
+    expect(sentence).not.toMatch(/birth control/);
+  });
+
+  it('pluralises over distinct dates', () => {
+    const conflicts = mergeConflicts(
+      {
+        version: 1,
+        days: { '2015-03-04': manualDay({ flow: 'light' }), '2015-03-05': manualDay({ flow: 'light' }) },
+        spans: [], gaps: [], birthControl: [],
+      },
+      {
+        version: 1,
+        days: { '2015-03-04': clueDay({ flow: 'heavy' }), '2015-03-05': clueDay({ flow: 'heavy' }) },
+        spans: [], gaps: [], birthControl: [],
+      },
+    );
+    expect(describeConflicts(conflicts)).toContain('2 days');
+  });
+
+  it('says nothing at all when nothing differed', () => {
+    expect(describeConflicts([])).toBe('');
+  });
+
+  it('ignores a birthControl conflict, because that section is not merged here', () => {
+    const conflicts = mergeConflicts(
+      { version: 1, days: {}, spans: [], gaps: [], birthControl: [{ method: 'implant', startedOn: '2015-05-01', endedOn: '2015-09-02', expectedEffect: 'suppress' }] },
+      { version: 1, days: {}, spans: [], gaps: [], birthControl: [{ method: 'implant', startedOn: '2015-05-01', endedOn: null, expectedEffect: 'suppress' }] },
+    );
+    expect(conflicts.some(conflict => conflict.field === 'birthControl')).toBe(true);
+    expect(describeConflicts(conflicts)).toBe('');
   });
 });

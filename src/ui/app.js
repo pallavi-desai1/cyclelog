@@ -43,9 +43,9 @@ import {
   renderEpisodes, renderEpisodeForm, renderBackupWarning, renderSwitchForm, renderEndForm,
 } from './settings.js';
 import {
-  addEpisode, updateEpisode, endEpisode, removeEpisode, switchMethod,
+  addEpisode, updateEpisode, endEpisode, removeEpisode, switchMethod, validateEpisode,
 } from '../episodes-edit.js';
-import { mergeIntoDocument, mergeConflicts } from '../merge.js';
+import { mergeIntoDocument, mergeConflicts, describeConflicts } from '../merge.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -477,37 +477,91 @@ async function importMore(files) {
   if (openDoc === null || files.length === 0) return;
   say('settings-import-notice', 'Reading your files…');
   try {
-    // Lowercased before the test: endsWith is case-sensitive, so a Clue
-    // export named Clue.JSON went to the legacy parser and imported nothing
-    // while reporting success. A second file of either kind is refused
-    // rather than silently overwriting the first.
-    let clueJson = null;
+    // Classified by content, the way the setup screen does it, rather than by
+    // extension. The extension routing was wrong twice over: a Clue export
+    // named Clue.JSON went to the legacy parser and imported nothing while
+    // reporting success, and every genuinely-named .json file was handed to
+    // the Clue parser as the file's TEXT — which spreads it into single
+    // characters, so a small export reported one unreadable "line" per
+    // character and a real one blew the stack and blamed her file. A second
+    // file of either kind is refused rather than silently overwriting the
+    // first.
+    let clueRecords = null;
     let legacyText = null;
+    let documentText = null;
     for (const file of files) {
       const text = await file.text();
-      if (file.name.toLowerCase().endsWith('.json')) {
-        if (clueJson !== null) {
-          say('settings-import-notice', 'Choose one export file at a time.');
-          return;
-        }
-        clueJson = text;
+      const kind = classifyRestoreFile(text);
+      if (kind === 'backup') {
+        // A backup REPLACES everything and needs her passphrase; merging one
+        // into the open document is not what that file is for.
+        return say('settings-import-notice', 'That is an encrypted backup. '
+          + 'Restoring one replaces everything, so it is done from the lock screen, not here.');
+      }
+      if (kind === 'document') {
+        if (documentText !== null) return say('settings-import-notice', 'Choose one export file at a time.');
+        documentText = text;
+        continue;
+      }
+      // Not one of ours. A Clue export is a bare JSON array of records; a
+      // legacy log is plain text. Parsing is the only way to tell, and it is
+      // also the step whose absence made this whole feature dead: the Clue
+      // parser needs the array, not the file's text.
+      let parsed = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = null;
+      }
+      if (Array.isArray(parsed)) {
+        if (clueRecords !== null) return say('settings-import-notice', 'Choose one export file at a time.');
+        clueRecords = parsed;
       } else {
-        if (legacyText !== null) {
-          say('settings-import-notice', 'Choose one export file at a time.');
-          return;
-        }
+        if (legacyText !== null) return say('settings-import-notice', 'Choose one export file at a time.');
         legacyText = text;
       }
     }
+    if (clueRecords === null && legacyText === null && documentText === null) {
+      return say('settings-import-notice', 'Those files could not be read.');
+    }
+    // One of her own plaintext exports is already a finished document; the
+    // other two kinds are raw sources a parser builds one from. Mixing the
+    // two in a single import is the same "one at a time" refusal.
+    if (documentText !== null && (clueRecords !== null || legacyText !== null)) {
+      return say('settings-import-notice', 'Choose one export file at a time.');
+    }
     if (openDoc === null) return;
 
-    const incoming = documentFromSources({ clueJson, legacyText });
+    // Her own plaintext export needs no importer and carries no warnings:
+    // parseDocument either returns the document or throws on a version it
+    // cannot read honestly.
+    const incoming = documentText !== null
+      ? { doc: parseDocument(documentText), warnings: [] }
+      : documentFromSources({ clueJson: clueRecords, legacyText });
     const merged = mergeIntoDocument(openDoc, incoming.doc);
+    // Her birth-control history is hers: she maintains it by hand in this
+    // screen, with real end dates. An export carries every episode as still
+    // open, and the merge lets the incoming side win a tie on startedOn — so
+    // importing it produced two open episodes, after which every prediction
+    // followed the method she had ended. Days, spans and gaps merge; this
+    // section does not.
+    const kept = { ...merged, birthControl: openDoc.birthControl ?? [] };
+    // Belt and braces for the section that silently decides every
+    // prediction: if a merge ever produces a shape validateEpisode rejects,
+    // nothing is written.
+    const episodes = kept.birthControl ?? [];
+    for (const [index, episode] of episodes.entries()) {
+      const problem = validateEpisode(episode, { existing: episodes, ignoreIndex: index });
+      if (problem !== null) {
+        return say('settings-import-notice', `Nothing was imported — that would have left your birth control history inconsistent: ${problem}`);
+      }
+    }
     // Computed from the same base as the merge, before the write moves
-    // openDoc on: the merge keeps the incoming side on a tie, so an end date
-    // she set by hand can be reverted by a re-import, and she is owed that.
+    // openDoc on: she is owed a word about anything the merge had to choose
+    // between. describeConflicts owns the wording and the counting rule, so
+    // both can be tested against real conflicts.
     const conflicts = mergeConflicts(openDoc, incoming.doc);
-    const ok = await saveSettingsDoc(merged, 'settings-import-notice');
+    const ok = await saveSettingsDoc(kept, 'settings-import-notice');
     if (ok === false || openDoc === null) return;
     // An edit form left open across this write remembers an index into
     // positions that have just moved — the merge re-sorts birthControl — so
@@ -515,12 +569,18 @@ async function importMore(files) {
     el('episode-form-host').innerHTML = '';
     // incoming.doc, not merged: counting the merged document told her a
     // small re-import had imported her entire history.
-    const notice = describeImport({ doc: incoming.doc, warnings: incoming.warnings });
-    const differed = conflicts.length === 1
-      ? '1 entry differed and the imported version was kept'
-      : `${conflicts.length} entries differed and the imported version was kept`;
-    const conflictNote = conflicts.length === 0 ? '' : ` ${differed} — check your birth control dates.`;
-    say('settings-import-notice', `${notice}${conflictNote}`);
+    const parts = [describeImport({ doc: incoming.doc, warnings: incoming.warnings })];
+    if ((incoming.doc.birthControl ?? []).length > 0) {
+      parts.push('Your birth control history was left as it is — add or change methods above.');
+    }
+    // Days, not fields, and her own values, not the file's: mergeDay ranks
+    // `manual` above both importers, so a day she corrected by hand wins and
+    // the conflict records HER value as kept. The old sentence said the
+    // imported version won and told her to check her birth control dates,
+    // neither of which was true.
+    const conflictNote = describeConflicts(conflicts);
+    if (conflictNote !== '') parts.push(conflictNote);
+    say('settings-import-notice', parts.join(' '));
     await repaintFromSettings();
   } catch {
     say('settings-import-notice', 'Those files could not be read.');
@@ -1868,6 +1928,15 @@ el('viewer-lock').addEventListener('click', () => {
 });
 el('go-settings').addEventListener('click', () => {
   if (openDoc === null) return;
+  // Same rule the calendar cells and Today already follow: navigation must
+  // not destroy a half-typed entry. Settings can clear #day-detail, which
+  // takes the form with it while `editing` stays set — after which every
+  // date tap writes its refusal into an element that no longer exists.
+  if (editing !== null) {
+    const errorField = document.getElementById('edit-error');
+    if (errorField !== null) errorField.textContent = 'Save or cancel this day first.';
+    return;
+  }
   screen('settings');
   drawSettings().catch(() => {});
 });

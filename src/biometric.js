@@ -1,5 +1,5 @@
 import { randomBytes } from './crypto.js';
-import { readMeta, writeMeta } from './store.js';
+import { readMeta, mutateMeta } from './store.js';
 
 const subtle = globalThis.crypto.subtle;
 
@@ -96,9 +96,12 @@ export async function enrollBiometric({ credentials, rpId, rpName = 'CycleLog', 
 // authenticator which passkey to use — so it lives beside the salt in the
 // unencrypted meta, where the lock screen can read it before unlocking.
 export async function rememberCredentialId(backend, credentialId) {
-  const meta = await readMeta(backend);
-  if (meta === null) throw new Error('no vault exists');
-  await writeMeta(backend, { ...meta, credentialId });
+  // Serialised with the other meta writers: this one can land in the middle
+  // of a passphrase change, and whichever read first lost its field.
+  await mutateMeta(backend, meta => {
+    if (meta === null) throw new Error('no vault exists');
+    return { ...meta, credentialId };
+  });
 }
 
 export async function readCredentialId(backend) {

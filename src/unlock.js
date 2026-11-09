@@ -3,7 +3,7 @@ import {
   SALT_BYTES, KDF_ITERATIONS,
 } from './crypto.js';
 import {
-  readMeta, writeMeta, saveDocument, loadDocument, eraseAll,
+  readMeta, writeMeta, mutateMeta, saveDocument, loadDocument, eraseAll,
 } from './store.js';
 
 export const IDLE_LOCK_MS = 5 * 60 * 1000;
@@ -109,18 +109,25 @@ export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOC
       return adopt(key);
     },
 
+    // Through mutateMeta so this cannot interleave with a passphrase change
+    // on the same screen: the two both read, modify and write meta, and
+    // whichever read first used to overwrite the other's field — leaving the
+    // stored wrappings without the biometric one while Settings said "Face
+    // ID is set up".
     async enrollWrapping(name, wrappingKey) {
       requireUnlocked();
-      const meta = await requireMeta();
-      // Same rule as changePassphrase below: wrap first, then write one new
-      // meta object. Assigning onto the object readMeta returned would land
-      // in storage ahead of the write on a backend that returns its stored
-      // object by reference, so a throw from the wrap left a half-change
-      // behind that no writeMeta had agreed to.
-      const wrapped = await wrapKey(wrappingKey, dataKey);
-      await writeMeta(backend, {
-        ...meta,
-        wrapped: { ...meta.wrapped, [name]: wrapped },
+      await mutateMeta(backend, async (meta) => {
+        if (meta === null) throw new Error('no vault exists');
+        // Same rule as changePassphrase below: wrap first, then write one new
+        // meta object. Assigning onto the object readMeta returned would land
+        // in storage ahead of the write on a backend that returns its stored
+        // object by reference, so a throw from the wrap left a half-change
+        // behind that no writeMeta had agreed to.
+        const wrapped = await wrapKey(wrappingKey, dataKey);
+        return {
+          ...meta,
+          wrapped: { ...meta.wrapped, [name]: wrapped },
+        };
       });
     },
 
@@ -146,25 +153,32 @@ export function createVault({ backend, now = () => Date.now(), idleMs = IDLE_LOC
       }
     },
 
+    // Through mutateMeta: the derive here takes a second or two, and a
+    // backup or a Face ID enrolment tapped during it used to read the old
+    // meta and write its field back over this one's. Queuing means the meta
+    // this reads is the newest one and nothing lands between the read and
+    // the write.
     async changePassphrase(nextPassphrase) {
       requireUnlocked();
-      const meta = await requireMeta();
-      const salt = randomBytes(SALT_BYTES);
-      // Derive and wrap before anything is assigned anywhere. A lock
-      // arriving mid-derive nulls dataKey and makes wrapKey throw; the old
-      // code had already put the new salt on the live meta object by then,
-      // so a backend that hands back its stored object by reference was
-      // left pairing a new salt with the old wrapped key - and neither
-      // passphrase opened the vault again. Nothing is mutated here: a new
-      // meta object is built and written in one go, so a throw anywhere
-      // above leaves the stored meta exactly as it was.
-      const passphraseKey = await deriveKey(nextPassphrase, salt, KDF_ITERATIONS);
-      const wrapped = await wrapKey(passphraseKey, dataKey);
-      await writeMeta(backend, {
-        ...meta,
-        salt: [...salt],
-        iterations: KDF_ITERATIONS,
-        wrapped: { ...meta.wrapped, passphrase: wrapped },
+      await mutateMeta(backend, async (meta) => {
+        if (meta === null) throw new Error('no vault exists');
+        const salt = randomBytes(SALT_BYTES);
+        // Derive and wrap before anything is assigned anywhere. A lock
+        // arriving mid-derive nulls dataKey and makes wrapKey throw; the old
+        // code had already put the new salt on the live meta object by then,
+        // so a backend that hands back its stored object by reference was
+        // left pairing a new salt with the old wrapped key - and neither
+        // passphrase opened the vault again. Nothing is mutated here: a new
+        // meta object is built and returned in one go, so a throw anywhere
+        // above leaves the stored meta exactly as it was.
+        const passphraseKey = await deriveKey(nextPassphrase, salt, KDF_ITERATIONS);
+        const wrapped = await wrapKey(passphraseKey, dataKey);
+        return {
+          ...meta,
+          salt: [...salt],
+          iterations: KDF_ITERATIONS,
+          wrapped: { ...meta.wrapped, passphrase: wrapped },
+        };
       });
     },
 

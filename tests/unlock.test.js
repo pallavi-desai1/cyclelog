@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { generateKey } from '../src/crypto.js';
-import { memoryBackend, readMeta, VAULT_KEY } from '../src/store.js';
+import { memoryBackend, readMeta, mutateMeta, VAULT_KEY } from '../src/store.js';
 import { createVault, IDLE_LOCK_MS, VAULT_VERSION } from '../src/unlock.js';
+import { markBackup, readLastBackup } from '../src/restore.js';
+import { rememberCredentialId } from '../src/biometric.js';
 
 const DOC = JSON.stringify({ version: 1, spans: [{ start: '2015-01-01' }] });
 const OTHER = JSON.stringify({ version: 1, spans: [] });
@@ -399,5 +401,118 @@ describe('erase', () => {
     await vault.erase();
     expect(await vault.status()).toBe('empty');
     expect(vault.read()).toBeNull();
+  });
+});
+
+// Finding F. markBackup, enrollWrapping, rememberCredentialId and
+// changePassphrase are all read-modify-write on the same unencrypted meta
+// record, and Settings puts the buttons that trigger them on one screen —
+// "Download encrypted backup" has no in-flight guard at all, so it can be
+// tapped during a passphrase change's one-to-two-second derive. Whichever
+// write landed second used to revert the other's field. mutateMeta
+// serialises them; these tests start the second mutation while the first is
+// still deriving.
+describe('concurrent meta writers', () => {
+  it('does not lose the backup date to a passphrase change running at the same time', async () => {
+    const { backend, vault } = fresh();
+    await vault.setup('correct horse', DOC);
+    await markBackup(backend, '2015-01-01');
+
+    // Started, not awaited: the derive is the slow part, and this is the
+    // window she can reach with two taps.
+    const change = vault.changePassphrase('new battery');
+    const backup = markBackup(backend, '2015-02-02');
+    await Promise.all([change, backup]);
+
+    const meta = await readMeta(backend);
+    expect(meta.lastBackupAt).toBe('2015-02-02');
+    expect(await readLastBackup(backend)).toBe('2015-02-02');
+
+    // And the passphrase change still completed.
+    const reopened = createVault({ backend });
+    expect(await reopened.unlock('correct horse')).toEqual({ ok: false, reason: 'wrong-passphrase' });
+    expect(await reopened.unlock('new battery')).toEqual({ ok: true });
+  });
+
+  it('keeps the backup date whichever order the two are started in', async () => {
+    const { backend, vault } = fresh();
+    await vault.setup('correct horse', DOC);
+
+    const backup = markBackup(backend, '2015-03-03');
+    const change = vault.changePassphrase('new battery');
+    await Promise.all([backup, change]);
+
+    expect((await readMeta(backend)).lastBackupAt).toBe('2015-03-03');
+    expect(await createVault({ backend }).unlock('new battery')).toEqual({ ok: true });
+  });
+
+  it('keeps both the new wrapping and the new salt when an enrolment straddles a change', async () => {
+    const { backend, vault } = fresh();
+    await vault.setup('correct horse', DOC);
+    const beforeSalt = (await readMeta(backend)).salt.join(',');
+    const deviceKey = await generateKey();
+
+    const change = vault.changePassphrase('new battery');
+    const enroll = vault.enrollWrapping('biometric', deviceKey);
+    await Promise.all([change, enroll]);
+
+    const meta = await readMeta(backend);
+    expect(Object.keys(meta.wrapped).sort()).toEqual(['biometric', 'passphrase']);
+    expect(meta.salt.join(',')).not.toBe(beforeSalt);
+
+    const reopened = createVault({ backend });
+    expect(await reopened.unlockWithKey('biometric', deviceKey)).toEqual({ ok: true });
+    const again = createVault({ backend });
+    expect(await again.unlock('new battery')).toEqual({ ok: true });
+    expect(await createVault({ backend }).unlock('correct horse'))
+      .toEqual({ ok: false, reason: 'wrong-passphrase' });
+  });
+
+  it('keeps the credential id across a concurrent passphrase change', async () => {
+    const { backend, vault } = fresh();
+    await vault.setup('correct horse', DOC);
+
+    const change = vault.changePassphrase('new battery');
+    const remember = rememberCredentialId(backend, [1, 2, 3]);
+    await Promise.all([change, remember]);
+
+    expect((await readMeta(backend)).credentialId).toEqual([1, 2, 3]);
+    expect(await createVault({ backend }).unlock('new battery')).toEqual({ ok: true });
+  });
+
+  it('lets a later mutation run after an earlier one rejects', async () => {
+    const { backend, vault } = fresh();
+    await vault.setup('correct horse', DOC);
+    // A locked vault makes changePassphrase throw before it writes anything.
+    vault.lock();
+    await expect(vault.changePassphrase('new battery')).rejects.toThrow(/locked/);
+    // A rejected queue tail must not make the next mutation skip its work.
+    await markBackup(backend, '2015-04-04');
+    expect((await readMeta(backend)).lastBackupAt).toBe('2015-04-04');
+    // The old passphrase still opens it: the failed change wrote nothing.
+    expect(await createVault({ backend }).unlock('correct horse')).toEqual({ ok: true });
+  });
+
+  it('reports a failed mutation to its own caller', async () => {
+    const backend = memoryBackend();
+    // No vault, so there is no meta to modify.
+    await expect(rememberCredentialId(backend, [1])).rejects.toThrow(/no vault exists/);
+    expect(await readMeta(backend)).toBeNull();
+  });
+
+  it('lets a later mutation run after one rejects inside the queue', async () => {
+    const { backend, vault } = fresh();
+    await vault.setup('correct horse', DOC);
+    // Rejecting after it is already queued, which is what a wrap failing on
+    // a vault locked mid-change looks like. The queue must not be left in a
+    // rejected state: a tail that every later mutation chains onto through
+    // its rejection handler would make each of them skip its own work in
+    // silence — the backup date would simply never be written again.
+    await expect(mutateMeta(backend, () => { throw new Error('nope'); }))
+      .rejects.toThrow(/nope/);
+    await markBackup(backend, '2015-05-05');
+    expect((await readMeta(backend)).lastBackupAt).toBe('2015-05-05');
+    await rememberCredentialId(backend, [9]);
+    expect((await readMeta(backend)).credentialId).toEqual([9]);
   });
 });

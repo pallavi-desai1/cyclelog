@@ -1,5 +1,5 @@
 import { EXPORT_VERSION } from './export.js';
-import { readMeta, writeMeta, VAULT_KEY } from './store.js';
+import { readMeta, writeMeta, mutateMeta, VAULT_KEY } from './store.js';
 
 export const BACKUP_KIND = 'cyclelog-backup';
 
@@ -51,10 +51,15 @@ export async function restoreBackup(backend, { meta, vault }) {
 // When she last took a backup. It lives beside the salt in the unencrypted
 // meta rather than inside the document, so recording it needs no re-seal and
 // cannot touch her history.
+// Through mutateMeta, not a bare read-modify-write: this one can be tapped
+// (Download encrypted backup has no in-flight guard) in the middle of a
+// passphrase change's PBKDF2, and the losing write reverted the other's
+// field.
 export async function markBackup(backend, dateISO) {
-  const meta = await readMeta(backend);
-  if (meta === null) return;
-  await writeMeta(backend, { ...meta, lastBackupAt: dateISO });
+  await mutateMeta(backend, meta => {
+    if (meta === null) return null;
+    return { ...meta, lastBackupAt: dateISO };
+  });
 }
 
 export async function readLastBackup(backend) {

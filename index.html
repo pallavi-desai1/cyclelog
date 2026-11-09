@@ -80,13 +80,16 @@
 
   <section class="card exports">
     <h3>Your data</h3>
-    <p class="exports-note">Everything here is produced on this device. Nothing is uploaded.</p>
+    <p class="exports-note">These downloads are produced on this device and are not
+      uploaded anywhere.</p>
     <div id="backup-warning"></div>
     <button id="export-backup" type="button">Download encrypted backup</button>
     <button id="export-data" type="button" class="secondary">Download data (JSON)</button>
     <button id="export-days" type="button" class="secondary">Download days (CSV)</button>
     <button id="export-cycles" type="button" class="secondary">Download cycles (CSV)</button>
     <label for="settings-import">Import another export (merged with what is here)</label>
+    <p class="exports-note">Importing changes your log. If sharing is on, it also sends an
+      updated encrypted copy to your partner.</p>
     <input id="settings-import" type="file" accept=".json,.txt,application/json,text/plain" multiple>
     <p id="settings-import-notice" role="status"></p>
     <p id="last-backup" role="status"></p>

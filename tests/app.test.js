@@ -1250,6 +1250,14 @@ describe('the settings screen', () => {
       expect(writeAt, name).toBeGreaterThan(-1);
       expect(body.slice(writeAt), name).toMatch(/openDoc === null|ok === false|!ok/);
     }
+    // The handlers' check is only half of it: it is satisfied by `ok ===
+    // false`, and with saveSettingsDoc's own post-write recheck deleted the
+    // helper returns true, so this test stayed green against the failure its
+    // name forbids. The recheck itself is pinned here and, in order, in
+    // "rechecks the session epoch after the settings write resolves".
+    const helper = functionBody(app(), 'saveSettingsDoc');
+    expect(helper, 'saveSettingsDoc').not.toBeNull();
+    expect(helper).toMatch(/sessionEpoch !== epoch\) return false;/);
   });
 
   // Review Focus 5: importing a fresh export after months of manual logging
@@ -1772,5 +1780,162 @@ describe('every module is valid JavaScript', () => {
       const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
       expect(result.status, `${file}: ${result.stderr}`).toBe(0);
     }
+  });
+});
+
+// The findings of the final whole-branch review. Each of these pins a
+// behaviour that a one-token edit could remove with the rest of the suite
+// still green — including the import never parsing its file, and both of his
+// month arrows going dead.
+describe('the final review findings', () => {
+  it('refuses to leave for Settings while a day editor is open', () => {
+    // goToToday and the calendar cells both refuse while `editing !== null`.
+    // go-settings did not, and Settings clears #day-detail — which takes the
+    // form with it while `editing` stays set, after which every date tap
+    // writes its refusal into an element that is no longer there and she
+    // cannot select any day at all.
+    const text = app();
+    const match = text.match(/el\('go-settings'\)\.addEventListener\('click', \(\) => \{([\s\S]*?)\n\}\);/);
+    expect(match, 'go-settings handler').not.toBeNull();
+    const handler = match[1];
+    expect(handler).toMatch(/editing !== null/);
+    expect(handler).toMatch(/edit-error/);
+    // The refusal has to come before the navigation, or the draft is gone
+    // either way.
+    expect(handler.indexOf('editing !== null')).toBeLessThan(handler.indexOf("screen('settings')"));
+  });
+
+  it('classifies each imported file by its content, not its extension', () => {
+    const body = functionBody(app(), 'importMore');
+    expect(body, 'importMore').not.toBeNull();
+    expect(body).toMatch(/classifyRestoreFile\(text\)/);
+    // The extension routing is gone: a Clue export named Clue.JSON went to
+    // the legacy parser, and her own plaintext export went to the Clue
+    // parser, which takes records and not text.
+    expect(body).not.toMatch(/endsWith\('\.json'\)/);
+    // An encrypted backup is not something to merge into the open document.
+    expect(body).toMatch(/'backup'/);
+    // And her own plaintext export is read by the document parser.
+    expect(body).toMatch(/parseDocument\(documentText\)/);
+  });
+
+  it('parses the Clue export before handing it to the importer', () => {
+    // M6, and Finding A's own bug: assigning the file's TEXT made
+    // parseClueMeasurements spread it into single characters — one "line
+    // could not be read" per character on a small file, and a RangeError
+    // reported as "Those files could not be read." on a real one.
+    const body = functionBody(app(), 'importMore');
+    expect(body).toMatch(/JSON\.parse\(text\)/);
+    expect(body).toMatch(/Array\.isArray\(parsed\)/);
+    expect(body).toMatch(/clueRecords = parsed;/);
+    expect(body).toMatch(/clueJson: clueRecords/);
+    // Never the raw string again.
+    expect(body).not.toMatch(/clueJson = text|clueJson: text/);
+  });
+
+  it('leaves her birth control history alone on a re-import and validates before writing', () => {
+    const body = functionBody(app(), 'importMore');
+    // An export carries every episode as still open and the merge lets the
+    // incoming side win a tie on startedOn, so merging produced two open
+    // episodes and every prediction followed the method she had ended.
+    expect(body).toMatch(/birthControl: openDoc\.birthControl \?\? \[\]/);
+    expect(body).toMatch(/validateEpisode\(/);
+    // The validated document, not the raw merge, is what gets written.
+    expect(body).toMatch(/saveSettingsDoc\(kept,/);
+    const validateAt = body.indexOf('validateEpisode(');
+    const writeAt = body.indexOf('await saveSettingsDoc(');
+    expect(validateAt).toBeGreaterThan(-1);
+    expect(writeAt).toBeGreaterThan(validateAt);
+    // And she is told, when the file carried episodes at all.
+    expect(body).toMatch(/Your birth control history was left as it is/);
+  });
+
+  it('describes a conflict in days, without claiming the imported version won', () => {
+    const body = functionBody(app(), 'importMore');
+    // The wording and the counting rule live in merge.js, where
+    // tests/merge.test.js executes them over real conflicts.
+    expect(body).toMatch(/describeConflicts\(conflicts\)/);
+    expect(body).not.toMatch(/entries differed|the imported version was kept|check your birth control dates/);
+  });
+
+  it('refuses a second settings write while one is still in flight', () => {
+    // M1, Task 5's C4. Without this guard two writes compute from the same
+    // openDoc and the second silently reverts the first.
+    const body = functionBody(app(), 'saveSettingsDoc');
+    expect(body, 'saveSettingsDoc').not.toBeNull();
+    expect(body).toMatch(/if \(saveInFlight\)/);
+    expect(body).toMatch(/Still saving/);
+    const guardAt = body.indexOf('if (saveInFlight)');
+    const claimAt = body.indexOf('saveInFlight = true');
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(claimAt).toBeGreaterThan(guardAt);
+    // The guard refuses rather than falling through to the write.
+    expect(body.slice(guardAt, claimAt)).toMatch(/return false;/);
+  });
+
+  it('rechecks the session epoch after the settings write resolves', () => {
+    // M2. A lock arriving mid-write must not revive the document afterwards:
+    // without the recheck, openDoc is adopted and a push is scheduled for a
+    // vault that has just been locked, and the helper reports success.
+    const body = functionBody(app(), 'saveSettingsDoc');
+    expect(body).toMatch(/sessionEpoch !== epoch\) return false;/);
+    const epochAt = body.indexOf('const epoch = sessionEpoch');
+    const awaitAt = body.indexOf('await writePromise');
+    const recheckAt = body.indexOf('sessionEpoch !== epoch');
+    const adoptAt = body.indexOf('openDoc = next');
+    expect(epochAt).toBeGreaterThan(-1);
+    expect(awaitAt).toBeGreaterThan(epochAt);
+    expect(recheckAt).toBeGreaterThan(awaitAt);
+    expect(adoptAt).toBeGreaterThan(recheckAt);
+  });
+
+  it('waits for an in-flight write before computing a share write', () => {
+    // M3, Task 5's NEW-1. The old assertion only required the identifier
+    // `pendingSave` to appear, which the assignment two lines down satisfies.
+    const helper = functionBody(app(), 'persistShareDoc');
+    expect(helper, 'persistShareDoc').not.toBeNull();
+    expect(helper).toMatch(/await pendingSave\?\.catch\(/);
+    const waitAt = helper.indexOf('await pendingSave?.catch(');
+    const mutateAt = helper.indexOf('mutate(openDoc)');
+    expect(waitAt).toBeGreaterThan(-1);
+    expect(mutateAt).toBeGreaterThan(waitAt);
+  });
+
+  it('steps his month by the delta he asked for', () => {
+    // M7, and the reported bug 0344803 exists to fix: with the delta
+    // ignored, both of his arrows do nothing and he is stuck on this month.
+    const body = functionBody(app(), 'stepViewerMonth');
+    expect(body, 'stepViewerMonth').not.toBeNull();
+    expect(body).toMatch(/shiftMonth\(viewerMonth, delta\)/);
+    expect(body).not.toMatch(/shiftMonth\(viewerMonth, 0\)/);
+  });
+
+  it('seeds his month from today only when he has none, never on a refresh', () => {
+    // M10: an unconditional reset yanks him back to this month every time he
+    // taps Refresh, which is the guarantee the comment above it states.
+    const body = functionBody(app(), 'paintViewer');
+    expect(body, 'paintViewer').not.toBeNull();
+    expect(body).toMatch(/if \(viewerMonth === null\) viewerMonth = monthOf\(localToday\(\)\);/);
+    // No bare `viewerMonth = monthOf(localToday());` statement of its own.
+    expect(body).not.toMatch(/\n\s+viewerMonth = monthOf\(localToday\(\)\);/);
+    // Still re-clamped every paint — a month in range can fall out of it
+    // when she narrows the scope.
+    expect(body).toMatch(/viewerMonth = clampMonth\(viewerMonth, monthRange\(doc, localToday\(\)\)\)/);
+  });
+
+  it('keeps the no-upload note to the downloads, and warns beside the import', () => {
+    // Finding E: every settings write ends in schedulePush(), so the import
+    // input sends a fresh encrypted copy when sharing is on — and it sat
+    // under "Nothing is uploaded."
+    const text = html();
+    expect(text).not.toContain('Nothing is uploaded');
+    expect(text).toMatch(/These downloads are produced on this device and are not\s+uploaded anywhere\./);
+    const importAt = text.indexOf('id="settings-import"');
+    const warnAt = text.indexOf('Importing changes your log');
+    expect(warnAt).toBeGreaterThan(-1);
+    expect(importAt).toBeGreaterThan(-1);
+    // The warning is next to the control it describes, inside the same card.
+    expect(Math.abs(importAt - warnAt)).toBeLessThan(400);
+    expect(text).toMatch(/updated encrypted copy to your partner/);
   });
 });

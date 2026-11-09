@@ -155,3 +155,22 @@ export function mergeIntoDocument(openDoc, incomingDoc) {
 export function mergeConflicts(openDoc, incomingDoc) {
   return mergeSources(openDoc, incomingDoc).conflicts;
 }
+
+// The sentence the re-import shows about what the merge had to choose
+// between. Here rather than in the UI glue so it can be tested against real
+// conflicts: the old sentence lived in app.js, said "N entries differed and
+// the imported version was kept — check your birth control dates", and was
+// wrong three times over. mergeDay ranks `manual` above both importers, so a
+// day she corrected by hand WINS and the conflict records HER value as kept;
+// the count was of fields, not days; and no birth-control date is involved.
+//
+// birthControl conflicts are ignored outright: the Settings re-import
+// restores her own episodes wholesale rather than merging them, so reporting
+// one would describe a change that did not happen.
+export function describeConflicts(conflicts) {
+  const relevant = (conflicts ?? []).filter(conflict => conflict.field !== 'birthControl');
+  if (relevant.length === 0) return '';
+  const dates = new Set(relevant.map(conflict => conflict.date));
+  return `${dates.size === 1 ? '1 day' : `${dates.size} days`} already had different values — `
+    + 'your own entries were kept.';
+}
