@@ -591,9 +591,9 @@ async function importMore(files) {
     // saving it would land on a different episode than the one on screen.
     el('episode-form-host').innerHTML = '';
     // describeMerge, not describeImport: describeImport answers "what was in
-    // this file", and after a re-import of her own export that is her whole
-    // history, so a no-op import announced itself as having imported nine
-    // years. What she needs is the delta the merge actually produced.
+    // this file", and after a re-import of her own export that is everything
+    // she has, so a no-op import announced itself as having imported the
+    // whole log. What she needs is the delta the merge actually produced.
     const parts = [describeMerge(openDoc, kept)];
     if ((incoming.doc.birthControl ?? []).length > 0) {
       parts.push('Your birth control history was left as it is — add or change methods above.');
@@ -605,6 +605,13 @@ async function importMore(files) {
     // neither of which was true.
     const conflictNote = describeConflicts(conflicts);
     if (conflictNote !== '') parts.push(conflictNote);
+    // Spec §14: a fresh backup is prompted for after a bulk edit, and this is
+    // the only bulk edit on this screen. Only when something actually
+    // changed — a no-op import nagging her would train her to ignore it.
+    const changed = describeMerge(openDoc, kept);
+    if (!/^Nothing new/.test(changed)) {
+      parts.push('Download a fresh backup below, so this is in one.');
+    }
     say('settings-import-notice', parts.join(' '));
     await repaintFromSettings();
   } catch {

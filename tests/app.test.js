@@ -1183,6 +1183,18 @@ describe('the settings screen', () => {
   // changed method. It already had Started on / Ended on, but recording a
   // change meant two edits whose dates the overlap rule would reject if given
   // the obvious answer, and the end date went through a typed prompt.
+  // Spec §14 names a post-bulk-edit backup prompt as a mitigation, and the
+  // re-import is the one bulk edit this screen has. The reminder existed; the
+  // prompt did not.
+  it('asks for a fresh backup after an import that changed something', () => {
+    const body = functionBody(app(), 'importMore');
+    // `fresh backup`, not `backup`: this function also refuses an encrypted
+    // backup file much earlier, and a bare /backup/i matched that instead.
+    expect(body).toMatch(/fresh backup/i);
+    // Only when something actually changed — a no-op import must not nag.
+    expect(body).toMatch(/Nothing new/);
+  });
+
   it('has a place to record the date she changed method', () => {
     expect(html()).toContain('id="switch-form-host"');
     const body = functionBody(app(), 'drawSettings');

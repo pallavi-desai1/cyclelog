@@ -141,10 +141,21 @@ const INFERENCE_PATTERNS = [
   /\bher \d+ (?:periods|cycles|years)\b/i,
 ];
 
+// Line by line AND across line breaks. A banned phrase wrapped by a comment
+// — "...imported nine\n    // years." — matched neither pattern while reading
+// exactly as it does to anyone who clones the repository. One slipped through
+// this way, in a comment, while the same words in a commit message were
+// caught. The flattened pass drops comment markers and collapses whitespace
+// so the wrap cannot hide it.
+const flatten = text => text
+  .replace(/^\s*(?:\/\/|\*|#)\s?/gm, ' ')
+  .replace(/\s+/g, ' ');
+
 for (const path of files) {
   // This file IS the list of banned phrasings, so scanning it finds itself.
   if (path.endsWith('check-privacy.mjs')) continue;
-  const lines = readFileSync(path, 'utf8').split('\n');
+  const text = readFileSync(path, 'utf8');
+  const lines = text.split('\n');
   for (const [i, line] of lines.entries()) {
     for (const pattern of INFERENCE_PATTERNS) {
       if (pattern.test(line)) {
@@ -152,6 +163,13 @@ for (const path of files) {
         console.log(`${path}:${i + 1} INFERS HER SITUATION (${pattern})`);
         break;
       }
+    }
+  }
+  const flat = flatten(text);
+  for (const pattern of INFERENCE_PATTERNS) {
+    if (pattern.test(flat) && !lines.some(line => pattern.test(line))) {
+      hits += 1;
+      console.log(`${path} INFERS HER SITUATION ACROSS A LINE BREAK (${pattern})`);
     }
   }
 }

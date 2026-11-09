@@ -483,9 +483,24 @@ describe('concurrent meta writers', () => {
   it('lets a later mutation run after an earlier one rejects', async () => {
     const { backend, vault } = fresh();
     await vault.setup('correct horse', DOC);
-    // A locked vault makes changePassphrase throw before it writes anything.
-    vault.lock();
-    await expect(vault.changePassphrase('new battery')).rejects.toThrow(/locked/);
+
+    // The rejection has to happen INSIDE the queue to test anything. A
+    // locked vault does not: changePassphrase calls requireUnlocked() before
+    // it ever reaches mutateMeta, so this test used to pass without creating
+    // the rejected tail its own name describes — it was green because an
+    // earlier test had already poisoned the shared queue.
+    const realSet = backend.set.bind(backend);
+    let failNextWrite = true;
+    backend.set = async (key, value) => {
+      if (failNextWrite && key === 'meta') {
+        failNextWrite = false;
+        throw new Error('storage is full');
+      }
+      return realSet(key, value);
+    };
+    await expect(vault.changePassphrase('new battery')).rejects.toThrow(/storage is full/);
+    backend.set = realSet;
+
     // A rejected queue tail must not make the next mutation skip its work.
     await markBackup(backend, '2015-04-04');
     expect((await readMeta(backend)).lastBackupAt).toBe('2015-04-04');
