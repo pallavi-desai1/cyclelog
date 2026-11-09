@@ -38,7 +38,12 @@ function pickTest(winner, loser, field, date, conflicts) {
 }
 
 function mergeDay(existing, incoming, date, conflicts) {
-  const winner = rank(incoming.source) >= rank(existing.source) ? incoming : existing;
+  // Strictly greater, not >=: a tie must go to what is already here. Her own
+  // plaintext export carries `manual` days, so a re-import puts manual
+  // against manual — and letting the file win meant every correction she had
+  // made since taking that export silently reverted. The file came from this
+  // device, so on a tie the device holds the later truth.
+  const winner = rank(incoming.source) > rank(existing.source) ? incoming : existing;
   const loser = winner === incoming ? existing : incoming;
 
   const merged = { ...loser };
@@ -173,4 +178,24 @@ export function describeConflicts(conflicts) {
   const dates = new Set(relevant.map(conflict => conflict.date));
   return `${dates.size === 1 ? '1 day' : `${dates.size} days`} already had different values — `
     + 'your own entries were kept.';
+}
+
+// What the merge ACTUALLY added, which is not what the file contained.
+// describeImport answers "what was in this file"; after a re-import of her own
+// export those are wildly different numbers, and reporting the file's made a
+// no-op import claim it had re-imported her whole history.
+export function describeMerge(before, after) {
+  const newDays = Object.keys(after.days ?? {})
+    .filter(date => (before.days ?? {})[date] === undefined).length;
+  const beforeSpans = new Set((before.spans ?? []).map(span => span.start));
+  const newSpans = (after.spans ?? [])
+    .filter(span => !beforeSpans.has(span.start)).length;
+
+  if (newDays === 0 && newSpans === 0) {
+    return 'Nothing new — everything in that file was already in your log.';
+  }
+  const parts = [];
+  if (newSpans > 0) parts.push(`${newSpans} ${newSpans === 1 ? 'period' : 'periods'}`);
+  if (newDays > 0) parts.push(`${newDays} logged ${newDays === 1 ? 'day' : 'days'}`);
+  return `Added ${parts.join(' and ')}.`;
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  mergeSources, mergeIntoDocument, mergeConflicts, describeConflicts, MERGE_DAY_FIELDS,
+  mergeSources, mergeIntoDocument, mergeConflicts, describeConflicts, describeMerge, MERGE_DAY_FIELDS,
 } from '../src/merge.js';
 import { validateEpisode } from '../src/episodes-edit.js';
 import { parseDocument, serializeDocument } from '../src/import.js';
@@ -118,14 +118,21 @@ describe('mergeSources', () => {
     expect(doc.days['2016-01-01'].precision).toBe('approx');
   });
 
-  it('breaks a precedence tie in favour of the later source, deterministically', () => {
+  // Direction changed deliberately. This used to pin "the later source wins",
+  // which was equally deterministic and fine while the only merge was two
+  // import files of different ranks. It stopped being fine once Settings let
+  // her re-import her own plaintext export: that file carries `manual` days,
+  // so it met her on-device `manual` days as a tie, the file won, and every
+  // correction she had made since taking the export reverted in silence. The
+  // file came from this device, so on a tie the device holds the later truth.
+  it('breaks a precedence tie in favour of what is already present, deterministically', () => {
     const { doc, conflicts } = mergeSources(
       { days: { '2016-01-01': { ...blankDay('clue'), flow: 'light' } }, spans: [], gaps: [] },
       { days: { '2016-01-01': { ...blankDay('clue'), flow: 'heavy' } }, spans: [], gaps: [] },
     );
-    expect(doc.days['2016-01-01'].flow).toBe('heavy');
+    expect(doc.days['2016-01-01'].flow).toBe('light');
     expect(conflicts).toEqual([
-      { date: '2016-01-01', field: 'flow', kept: 'heavy', discarded: 'light' },
+      { date: '2016-01-01', field: 'flow', kept: 'light', discarded: 'heavy' },
     ]);
   });
 
@@ -389,5 +396,83 @@ describe('describeConflicts', () => {
     );
     expect(conflicts.some(conflict => conflict.field === 'birthControl')).toBe(true);
     expect(describeConflicts(conflicts)).toBe('');
+  });
+});
+
+describe('a tie between two equally-trusted days', () => {
+  // Her own plaintext export carries `manual` days, so re-importing one puts a
+  // manual day against a manual day. The tie used to go to the FILE, which
+  // means every correction she made since that export silently reverted — and
+  // the notice told her her own entries had been kept. The device holds the
+  // later truth by definition: the file came from it.
+  const onDevice = () => ({
+    version: 1, gaps: [], spans: [], birthControl: [],
+    days: { '2015-03-04': { flow: 'light', cramps: 'mild', source: 'manual' } },
+  });
+  const herOlderExport = () => ({
+    version: 1, gaps: [], spans: [], birthControl: [],
+    days: { '2015-03-04': { flow: 'heavy', cramps: 'severe', source: 'manual' } },
+  });
+
+  it('keeps what is already on the phone', () => {
+    const merged = mergeIntoDocument(onDevice(), herOlderExport());
+    expect(merged.days['2015-03-04'].flow).toBe('light');
+    expect(merged.days['2015-03-04'].cramps).toBe('mild');
+  });
+
+  it('records the conflict with her value as the one kept', () => {
+    const { conflicts } = mergeSources(onDevice(), herOlderExport());
+    const flow = conflicts.find(conflict => conflict.field === 'flow');
+    expect(flow.kept).toBe('light');
+    expect(flow.discarded).toBe('heavy');
+  });
+
+  it('still lets a more trusted source win, so this is a tie rule only', () => {
+    const imported = {
+      version: 1, gaps: [], spans: [], birthControl: [],
+      days: { '2015-03-04': { flow: 'heavy', source: 'clue' } },
+    };
+    // manual outranks clue, so hers wins whichever side it is on
+    expect(mergeIntoDocument(onDevice(), imported).days['2015-03-04'].flow).toBe('light');
+    expect(mergeIntoDocument(imported, onDevice()).days['2015-03-04'].flow).toBe('light');
+  });
+});
+
+describe('describeMerge', () => {
+  const doc = (days, spans = []) => ({ version: 1, gaps: [], birthControl: [], days, spans });
+
+  // describeImport describes the FILE. Re-importing her own export reported
+  // "Imported 12 periods and 9 logged days" with nothing actually added,
+  // which is the ordinary case now that Settings routes her own export into
+  // the merge.
+  it('says plainly when the file added nothing', () => {
+    const before = doc({ '2015-03-04': { flow: 'light', source: 'manual' } });
+    expect(describeMerge(before, before)).toMatch(/nothing new|already/i);
+  });
+
+  it('counts only what the merge actually added', () => {
+    const before = doc({ '2015-03-04': { flow: 'light', source: 'manual' } });
+    const after = doc({
+      '2015-03-04': { flow: 'light', source: 'manual' },
+      '2015-04-01': { flow: 'heavy', source: 'clue' },
+      '2015-04-02': { flow: 'medium', source: 'clue' },
+    }, [{ start: '2015-04-01', end: '2015-04-02' }]);
+    const text = describeMerge(before, after);
+    expect(text).toMatch(/2 logged days/);
+    expect(text).toMatch(/1 period/);
+  });
+
+  it('uses singular where it should', () => {
+    const before = doc({});
+    const after = doc({ '2015-04-01': { flow: 'heavy', source: 'clue' } }, [{ start: '2015-04-01', end: '2015-04-01' }]);
+    const text = describeMerge(before, after);
+    expect(text).toMatch(/1 logged day\b/);
+    expect(text).toMatch(/1 period\b/);
+  });
+
+  it('never reports a negative count', () => {
+    const before = doc({ a: 1, b: 2 });
+    const after = doc({ a: 1 });
+    expect(describeMerge(before, after)).not.toMatch(/-/);
   });
 });

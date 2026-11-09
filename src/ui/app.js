@@ -45,7 +45,9 @@ import {
 import {
   addEpisode, updateEpisode, endEpisode, removeEpisode, switchMethod, validateEpisode,
 } from '../episodes-edit.js';
-import { mergeIntoDocument, mergeConflicts, describeConflicts } from '../merge.js';
+import {
+  mergeIntoDocument, mergeConflicts, describeConflicts, describeMerge,
+} from '../merge.js';
 
 if ('serviceWorker' in navigator) {
   // Registration failure is not fatal: without the worker the app still runs,
@@ -493,10 +495,14 @@ async function importMore(files) {
       const text = await file.text();
       const kind = classifyRestoreFile(text);
       if (kind === 'backup') {
-        // A backup REPLACES everything and needs her passphrase; merging one
-        // into the open document is not what that file is for.
-        return say('settings-import-notice', 'That is an encrypted backup. '
-          + 'Restoring one replaces everything, so it is done from the lock screen, not here.');
+        // A backup REPLACES everything, so merging one into the open document
+        // is not what that file is for. It must not name the lock screen:
+        // #restore-file lives on the setup screen, which is only reached with
+        // no vault on the device, so a phone that already holds her log will
+        // never offer it. Saying where it IS would send her to a dead end.
+        return say('settings-import-notice', 'That is an encrypted backup, which replaces a '
+          + 'whole log rather than adding to one — it can only be restored onto a phone with '
+          + 'no log on it yet. To import into this log, use a data export instead.');
       }
       if (kind === 'document') {
         if (documentText !== null) return say('settings-import-notice', 'Choose one export file at a time.');
@@ -553,7 +559,12 @@ async function importMore(files) {
     for (const [index, episode] of episodes.entries()) {
       const problem = validateEpisode(episode, { existing: episodes, ignoreIndex: index });
       if (problem !== null) {
-        return say('settings-import-notice', `Nothing was imported — that would have left your birth control history inconsistent: ${problem}`);
+        // These are her STORED episodes — the file's were discarded above — so
+        // this can only fire when what is already saved is inconsistent, and
+        // blaming the file would be wrong. An older build's re-import could
+        // leave two open episodes, which is exactly this shape.
+        return say('settings-import-notice', 'Nothing was imported: your birth control '
+          + `history needs fixing first — ${problem}`);
       }
     }
     // Computed from the same base as the merge, before the write moves
@@ -567,9 +578,11 @@ async function importMore(files) {
     // positions that have just moved — the merge re-sorts birthControl — so
     // saving it would land on a different episode than the one on screen.
     el('episode-form-host').innerHTML = '';
-    // incoming.doc, not merged: counting the merged document told her a
-    // small re-import had imported her entire history.
-    const parts = [describeImport({ doc: incoming.doc, warnings: incoming.warnings })];
+    // describeMerge, not describeImport: describeImport answers "what was in
+    // this file", and after a re-import of her own export that is her whole
+    // history, so a no-op import announced itself as having imported nine
+    // years. What she needs is the delta the merge actually produced.
+    const parts = [describeMerge(openDoc, kept)];
     if ((incoming.doc.birthControl ?? []).length > 0) {
       parts.push('Your birth control history was left as it is — add or change methods above.');
     }

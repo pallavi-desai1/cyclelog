@@ -1939,3 +1939,45 @@ describe('the final review findings', () => {
     expect(text).toMatch(/updated encrypted copy to your partner/);
   });
 });
+// `node --check` parses src/ui/app.js but cannot see an identifier that is
+// used and never imported — that is a runtime ReferenceError, and because
+// every other test here reads this file as TEXT, nothing caught it. One
+// slipped in during a fix round: describeMerge was called and not imported,
+// which would have thrown the moment she pressed Import.
+describe('app.js imports everything it calls', () => {
+  const moduleFor = (spec) => {
+    const rel = spec.replace(/^\.\//, 'ui/').replace(/^\.\.\//, '');
+    return readFileSync(new URL(`../src/${rel}`, import.meta.url), 'utf8');
+  };
+
+  it('names every helper it uses from its own modules', () => {
+    const text = app();
+    const imports = [...text.matchAll(/import\s*\{([^}]+)\}\s*from\s*'(\.[^']+)'/g)];
+    expect(imports.length).toBeGreaterThan(5);
+
+    const imported = new Set();
+    const specs = [];
+    for (const [, list, spec] of imports) {
+      specs.push(spec);
+      for (const name of list.split(',').map(part => part.trim().split(/\s+as\s+/)[0]).filter(Boolean)) {
+        imported.add(name);
+      }
+    }
+
+    // Anything app.js declares itself is fine, imported or not.
+    const declared = new Set(
+      [...text.matchAll(/(?:^|\n)\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g)].map(m => m[1])
+        .concat([...text.matchAll(/(?:^|\n)\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)].map(m => m[1])),
+    );
+
+    const missing = [];
+    for (const spec of specs) {
+      for (const [, name] of moduleFor(spec).matchAll(/export\s+(?:async\s+)?(?:function|const|class)\s+([A-Za-z_$][\w$]*)/g)) {
+        if (imported.has(name) || declared.has(name)) continue;
+        // Called, or referenced as a value, somewhere in app.js.
+        if (new RegExp(`\\b${name}\\s*\\(`).test(text)) missing.push(`${name} (from ${spec})`);
+      }
+    }
+    expect(missing, 'used in app.js but not imported').toEqual([]);
+  });
+});
