@@ -118,6 +118,17 @@
 
 <main id="viewer-screen" class="screen" hidden>
   <div id="viewer"></div>
+
+  <section class="card calendar">
+    <div class="cal-head">
+      <button id="viewer-prev" type="button" aria-label="Previous month">&lsaquo;</button>
+      <p id="viewer-label" class="cal-month" role="status"></p>
+      <button id="viewer-next" type="button" aria-label="Next month">&rsaquo;</button>
+      <button id="viewer-today" type="button">Today</button>
+    </div>
+    <div id="viewer-calendar"></div>
+  </section>
+
   <div id="viewer-day"></div>
   <button id="viewer-refresh" type="button">Refresh</button>
   <p id="viewer-error" role="alert"></p>

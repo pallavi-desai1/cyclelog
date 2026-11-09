@@ -17,7 +17,7 @@ import {
   markBackup, readLastBackup, requestPersistentStorage, eraseConfirmed,
 } from '../restore.js';
 import {
-  monthGrid, monthOf, shiftMonth, projectedDates, monthRange, clampMonth,
+  monthGrid, monthOf, shiftMonth, monthLabel, projectedDates, monthRange, clampMonth,
 } from '../calendar.js';
 import { dayDetail } from '../day.js';
 import {
@@ -89,6 +89,8 @@ function returnToLock() {
   // the DOM this clears — never written anywhere his vault would persist it
   // past the lock.
   el('viewer').innerHTML = '';
+  el('viewer-calendar').innerHTML = '';
+  say('viewer-label', '');
   el('viewer-day').innerHTML = '';
   say('viewer-error', '');
   // Static markup, not part of #viewer's innerHTML, so the clear above does
@@ -125,6 +127,7 @@ function returnToLock() {
   viewerRecordData = null;
   viewerShared = null;
   viewerDate = null;
+  viewerMonth = null;
   viewerSummary = null;
   // The editing draft lives only in the DOM the lock screen is about to
   // replace, but the flag that says "a form is open" is state in this
@@ -166,6 +169,11 @@ let viewerShared = null;
 // drawn from. Kept here rather than read back out of the DOM so the panel can
 // be redrawn after a refresh without re-deriving what he had selected.
 let viewerDate = null;
+// Which month he is looking at. His calendar used to be pinned to the current
+// month, with no controls at all — the arrows and Today are static markup on
+// her screen — so when the month turned over he had no way back to the month
+// her period was in.
+let viewerMonth = null;
 let viewerSummary = null;
 
 // The date currently open in the editor, or null when the day panel is
@@ -1143,6 +1151,43 @@ async function refreshViewer() {
 // her data cannot survive a lock), which means nothing inside it can be a
 // persistent, individually-addressed node — only #viewer itself, and the
 // static controls outside it, survive from one paint to the next.
+// His calendar, in its own element so the month head can sit above it. Drawn
+// from viewerMonth rather than today, which is the whole point: he has to be
+// able to look back at the month her period was actually in.
+function drawViewerCalendar() {
+  if (viewerShared === null || viewerMonth === null) {
+    el('viewer-calendar').innerHTML = '';
+    say('viewer-label', '');
+    return;
+  }
+  const grid = monthGrid(viewerShared.doc, {
+    month: viewerMonth,
+    todayISO: localToday(),
+    adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date,
+    baselineDates: [],
+  });
+  el('viewer-calendar').innerHTML = renderCalendar(grid);
+  say('viewer-label', monthLabel(viewerMonth));
+  markViewerSelected();
+}
+
+// Clamped to the months her shared copy actually covers, the same rule her
+// own picker follows — paging into 1990 would just show him empty grids.
+function stepViewerMonth(delta) {
+  if (viewerShared === null || viewerMonth === null) return;
+  viewerMonth = clampMonth(
+    shiftMonth(viewerMonth, delta),
+    monthRange(viewerShared.doc, localToday()),
+  );
+  drawViewerCalendar();
+}
+
+function viewerToday() {
+  if (viewerShared === null) return;
+  viewerMonth = monthOf(localToday());
+  drawViewerCalendar();
+}
+
 // His day panel. Built from viewerShared — the decrypted copy of what she
 // actually sent — never from openDoc, which on his device is always null
 // anyway: reaching for it would be the bug that quietly makes this pane read
@@ -1168,10 +1213,10 @@ function drawViewerDay() {
 
 function markViewerSelected() {
   if (viewerDate === null) return;
-  for (const cell of el('viewer').querySelectorAll('.cal-selected')) {
+  for (const cell of el('viewer-calendar').querySelectorAll('.cal-selected')) {
     cell.classList.remove('cal-selected');
   }
-  const cell = el('viewer').querySelector(`[data-date="${viewerDate}"]`);
+  const cell = el('viewer-calendar').querySelector(`[data-date="${viewerDate}"]`);
   if (cell !== null) cell.classList.add('cal-selected');
 }
 
@@ -1197,13 +1242,12 @@ async function paintViewer() {
       const { doc, scope, updatedAt } = viewerShared;
       const summary = buildSummary(doc, localToday());
       viewerSummary = summary;
-      const grid = monthGrid(doc, {
-        month: monthOf(localToday()), todayISO: localToday(),
-        adaptedDate: summary.adapted.date, baselineDates: [],
-      });
+      // Only on first paint, or after a lock: a refresh must not yank him
+      // back to this month when he was reading an earlier one.
+      if (viewerMonth === null) viewerMonth = monthOf(localToday());
       el('viewer').innerHTML = renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid })
-        + renderSummary(summary)
-        + renderCalendar(grid);
+        + renderSummary(summary);
+      drawViewerCalendar();
     }
     // After the pane is replaced: a refresh must not silently drop the day he
     // had open, and must not leave a stale card under a header that now says
@@ -1771,11 +1815,15 @@ el('viewer-create').addEventListener('click', () => { createViewer(); });
 // Tap a day on his calendar. Delegated on #viewer because refresh replaces
 // that pane's markup wholesale, so a listener bound to a cell would not
 // survive the first refresh.
-el('viewer').addEventListener('click', (event) => {
+el('viewer-calendar').addEventListener('click', (event) => {
   const cell = event.target.closest('[data-date]');
   if (cell === null) return;
   selectViewerDay(cell.dataset.date);
 });
+
+el('viewer-prev').addEventListener('click', () => { stepViewerMonth(-1); });
+el('viewer-next').addEventListener('click', () => { stepViewerMonth(1); });
+el('viewer-today').addEventListener('click', () => { viewerToday(); });
 
 el('viewer-refresh').addEventListener('click', () => { paintViewer(); });
 el('viewer-rekey').addEventListener('click', () => { rekeyViewer(); });

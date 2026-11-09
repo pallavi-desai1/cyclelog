@@ -545,3 +545,19 @@ input { font-family: var(--font-body); }
   color: var(--danger);
   border: 2px solid var(--danger);
 }
+
+/* His month label. Deliberately NOT a button like hers: her label opens a
+   month picker, and his has arrows and Today only, so something that looks
+   tappable and does nothing would be a worse answer than a plain heading.
+   Same script face and weight, so the two calendars still read as one app. */
+.cal-month {
+  margin: 0;
+  padding: 0 8px;
+  color: var(--heading);
+  font-family: var(--font-script);
+  font-size: 1.5em;
+  font-weight: 700;
+  line-height: var(--tap);
+  flex: 1;
+  text-align: center;
+}

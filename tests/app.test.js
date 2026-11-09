@@ -112,7 +112,8 @@ describe('app wiring', () => {
       'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
       "renderShareCard({ state, fingerprint: state.key === null ? '' : await fingerprint(state.key), ownerUid: state.identity === null ? null : state.identity.uid, })",
       "renderViewerHeader({ scope: null, updatedAt: null, label: '', uid: viewerRecordData.identity.uid })",
-      "renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid }) + renderSummary(summary) + renderCalendar(grid)",
+      "renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid }) + renderSummary(summary)",
+      'renderCalendar(grid)',
       'renderDay(dayDetail(viewerShared.doc, viewerDate, { todayISO: localToday(), adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date, baselineDates: [], }), { canEdit: false })',
       'renderEpisodes(openDoc.birthControl)',
       'renderEpisodeForm({ episode: null, index: null })',
@@ -231,7 +232,7 @@ describe('idle locking', () => {
     const helper = functionBody(text, 'returnToLock');
     const inHelper = (helper.match(/innerHTML = ''/g) || []).length;
     const everywhere = (text.match(/innerHTML = ''/g) || []).length;
-    expect(inHelper).toBe(9);             // the summary, the calendar, the day panel, the share card, his viewer pane, his day panel, the episode list, the episode form host and the backup warning
+    expect(inHelper).toBe(10);             // the summary, the calendar, the day panel, the share card, his viewer pane, his calendar, his day panel, the episode list, the episode form host and the backup warning
     expect(helper).toMatch(/closePicker\(\)/);   // the picker, through its own helper
     // Those six are the only sites that clear rendered markup, so there is
     // exactly one place that can forget a pane.
@@ -246,7 +247,12 @@ describe('idle locking', () => {
     // stale index overwrote a different episode than the one on screen.
     // +8 now, not +7: repaintFromSettings clears the day panel, which would
     // otherwise go on showing predictions computed before the episode change.
-    expect(everywhere).toBe(inHelper + 8);
+    // +9 now, not +8: drawViewerCalendar clears his calendar when there is no
+    // shared copy or no month, the same self-clear every other draw helper
+    // does. The nine outside returnToLock are repaintFromSettings,
+    // saveEpisode, endEpisodeAt, removeEpisodeAt, importMore,
+    // drawViewerCalendar, drawViewerDay, closePicker and start.
+    expect(everywhere).toBe(inHelper + 9);
   });
 });
 
@@ -1501,7 +1507,10 @@ describe('the viewer mode', () => {
   });
 
   it('wires his calendar taps to the day panel', () => {
-    expect(app()).toMatch(/viewer'\)\.addEventListener\('click'/);
+    // #viewer-calendar, not #viewer: the cells moved there so the month head
+    // could sit above them, and a listener left on #viewer would have gone
+    // quietly dead.
+    expect(app()).toMatch(/viewer-calendar'\)\.addEventListener\('click'/);
   });
 
   it('clears his day panel when the shared copy goes away', () => {
@@ -1511,11 +1520,70 @@ describe('the viewer mode', () => {
     expect(body).toMatch(/viewerShared === null|viewerDate === null/);
   });
 
+  // She reported this from his phone: when the month turned over, he had no
+  // way to look back at the month her period was actually in. His calendar
+  // was pinned to monthOf(localToday()) and the arrows, the label and Today
+  // are static markup inside #app — her screen. He never had navigation at
+  // all; the month boundary is just when that started to matter.
+  it('gives him month navigation of his own', () => {
+    const text = html();
+    expect(text).toContain('id="viewer-prev"');
+    expect(text).toContain('id="viewer-next"');
+    expect(text).toContain('id="viewer-today"');
+    expect(text).toContain('id="viewer-label"');
+    expect(app()).toMatch(/viewer-prev'\)\.addEventListener/);
+    expect(app()).toMatch(/viewer-next'\)\.addEventListener/);
+    expect(app()).toMatch(/viewer-today'\)\.addEventListener/);
+  });
+
+  it('draws his calendar from the month he is looking at, not from today', () => {
+    const body = functionBody(app(), 'drawViewerCalendar');
+    expect(body, 'drawViewerCalendar').not.toBeNull();
+    expect(body).toMatch(/viewerMonth/);
+    // The defect itself: a hardcoded current month is what left him stuck.
+    expect(body).not.toMatch(/month: monthOf\(localToday\(\)\)/);
+  });
+
+  it('keeps his paging inside the months her shared copy covers', () => {
+    const body = functionBody(app(), 'stepViewerMonth');
+    expect(body, 'stepViewerMonth').not.toBeNull();
+    expect(body).toMatch(/shiftMonth\(/);
+    expect(body).toMatch(/clampMonth\(|monthRange\(/);
+  });
+
+  it('lets him get back to today in one tap', () => {
+    const body = functionBody(app(), 'viewerToday');
+    expect(body, 'viewerToday').not.toBeNull();
+    expect(body).toMatch(/localToday\(\)/);
+  });
+
+  // The calendar moves out of #viewer into its own element so the month head
+  // can sit above it. Both of these pointed at #viewer and would have gone
+  // quietly dead.
+  it('still finds his calendar cells after the calendar moves', () => {
+    expect(html()).toContain('id="viewer-calendar"');
+    const tap = app();
+    expect(tap).toMatch(/viewer-calendar'\)\.addEventListener\('click'/);
+    const marker = functionBody(tap, 'markViewerSelected');
+    expect(marker, 'markViewerSelected').not.toBeNull();
+    expect(marker).toMatch(/viewer-calendar/);
+    expect(marker).not.toMatch(/el\('viewer'\)/);
+  });
+
+  it('clears his month panes on lock like every other pane', () => {
+    const helper = functionBody(app(), 'returnToLock');
+    expect(helper).toMatch(/viewer-calendar'\)\.innerHTML = ''/);
+  });
+
   it('renders her data with the same tested renderers', () => {
     const body = functionBody(app(), 'paintViewer');
     expect(body).toMatch(/renderSummary\(/);
-    expect(body).toMatch(/renderCalendar\(/);
     expect(body).toMatch(/renderViewerHeader\(/);
+    // The calendar is drawn by drawViewerCalendar now, so the chain stays
+    // closed here rather than ending: paintViewer must still reach it, and
+    // it must still be the tested renderer at the other end.
+    expect(body).toMatch(/drawViewerCalendar\(\)/);
+    expect(functionBody(app(), 'drawViewerCalendar')).toMatch(/renderCalendar\(/);
   });
 
   it('refreshes on open and on an explicit refresh, since there is no push', () => {
