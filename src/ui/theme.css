@@ -574,3 +574,16 @@ input { font-family: var(--font-body); }
 #end-form h4 { margin: 0 0 0.4em; color: var(--heading); }
 
 .switch-note { font-size: 0.9rem; opacity: 0.8; margin: 0 0 0.6em; }
+
+/* Sits directly under the summary card as part of it (spec §10.2), quiet
+   enough not to compete with the headline she came to read. Empty when
+   sharing is off, so it collapses rather than leaving a gap. */
+.home-sync {
+  margin: calc(var(--gap) * -0.5) 0 var(--gap);
+  padding: 0 4px;
+  font-size: 0.9rem;
+  color: var(--text);
+  opacity: 0.8;
+}
+
+.home-sync:empty { display: none; margin: 0; }

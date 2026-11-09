@@ -1944,6 +1944,41 @@ describe('the final review findings', () => {
 // every other test here reads this file as TEXT, nothing caught it. One
 // slipped in during a fix round: describeMerge was called and not imported,
 // which would have thrown the moment she pressed Import.
+// Spec §10.2 lists a sync status line as an item on the summary card. Moving
+// the share card into Settings took the only sync status the home screen had
+// two taps away, so a push that never landed became invisible from the screen
+// she opens first — and she would believe her partner has data he does not.
+describe('the home screen says whether her partner has her data', () => {
+  it('has a place for it on the summary card', () => {
+    expect(html()).toContain('id="home-sync"');
+    const appHtml = html();
+    const appStart = appHtml.indexOf('<main id="app"');
+    const appEnd = appHtml.indexOf('<main', appStart + 5);
+    const home = appHtml.slice(appStart, appEnd === -1 ? undefined : appEnd);
+    expect(home, 'home-sync must be on the home screen').toContain('id="home-sync"');
+  });
+
+  it('fills it from the same tested describePush the share card uses', () => {
+    const text = app();
+    // Chain, not location: paint delegates to the helper, and the helper is
+    // what must reach the tested renderer. Both repaint sites call it.
+    expect(functionBody(text, 'paint')).toMatch(/drawHomeSync\(\)/);
+    expect(functionBody(text, 'saveDay')).toMatch(/drawHomeSync\(\)/);
+    const helper = functionBody(text, 'drawHomeSync');
+    expect(helper, 'drawHomeSync').not.toBeNull();
+    expect(helper).toMatch(/home-sync/);
+    expect(helper).toMatch(/describePush\(/);
+  });
+
+  it('says nothing at all when sharing is off', () => {
+    // The line must not appear for someone not sharing: an empty status is
+    // noise on the one card she takes to a doctor.
+    const helper = functionBody(app(), 'drawHomeSync');
+    expect(helper).toMatch(/key === null/);
+    expect(helper).toMatch(/shareState\(/);
+  });
+});
+
 describe('app.js imports everything it calls', () => {
   const moduleFor = (spec) => {
     const rel = spec.replace(/^\.\//, 'ui/').replace(/^\.\.\//, '');

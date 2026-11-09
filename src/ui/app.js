@@ -30,7 +30,7 @@ import { renderEditor, patchFromValues, saveOutcome } from './editor.js';
 import { renderShareCard, PUSH_DEBOUNCE_MS } from './share.js';
 import {
   shareState, withSharing, withScope, withIdentity, withViewer, withoutViewer,
-  withPushResult, withoutSharing, buildPayload,
+  withPushResult, withoutSharing, buildPayload, describePush,
 } from '../sync/share.js';
 import { generateSyncKey, fingerprint, importSyncKey } from '../sync/key.js';
 import {
@@ -247,6 +247,7 @@ async function paint(note = '', { navigate = true } = {}) {
   openDoc = parseDocument(content);
   openSummary = buildSummary(openDoc, localToday());
   el('summary').innerHTML = renderSummary(openSummary);
+  drawHomeSync();
   if (unsavedWarning !== null) {
     note = `Your last entry may not have saved — please check ${unsavedWarning}.`;
     unsavedWarning = null;
@@ -274,6 +275,17 @@ async function paint(note = '', { navigate = true } = {}) {
 
 // Review Focus 3: she only trusts this card if it tells the truth about what
 // reached him, so every draw re-reads the stored push result, never a guess.
+// Spec §10.2: the sync status belongs on the summary card. It used to live on
+// the share card, which now sits two taps away in Settings — so a push that
+// never landed was invisible from the screen she opens first, and she would
+// believe he has data he does not. Empty when sharing is off: an unused
+// status line is noise on the card she takes to an appointment.
+function drawHomeSync() {
+  if (openDoc === null) return;
+  const sharing = shareState(openDoc);
+  say('home-sync', sharing.key === null ? '' : describePush(sharing.lastPush, sharing.scope));
+}
+
 async function drawShare() {
   if (openDoc === null) return;
   const state = shareState(openDoc);
@@ -743,6 +755,7 @@ async function saveDay() {
     // because a different editor happened to be open when the write landed.
     // Neither touches #day-detail, so an open draft for another day survives.
     el('summary').innerHTML = renderSummary(openSummary);
+    drawHomeSync();
     drawCalendar();
     // Not awaited: her save just landed in the vault, and sending a copy to
     // him is a courtesy that must never hold that up. Important 10: now
