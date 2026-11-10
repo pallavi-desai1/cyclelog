@@ -214,3 +214,28 @@ describe('renderEndForm', () => {
     })).toContain('data-end-index="0"');
   });
 });
+
+describe('renderEpisodeForm tells her which thing she is editing', () => {
+  // The Edit button "did nothing" because the form it fills sat below the
+  // change-method form, off-screen on a phone, and carried no heading — so it
+  // was indistinguishable from the blank add form already sitting there.
+  it('names the method when editing', () => {
+    const html = renderEpisodeForm({
+      episode: { startedOn: '2015-01-01', endedOn: null, method: 'implant', expectedEffect: 'suppress' },
+      index: 0,
+    });
+    expect(html).toMatch(/<h4>[^<]*implant/i);
+  });
+
+  it('says it is adding when there is nothing to edit', () => {
+    expect(renderEpisodeForm({ episode: null, index: null })).toMatch(/<h4>[^<]*add/i);
+  });
+
+  it('escapes the method name in the heading', () => {
+    const html = renderEpisodeForm({
+      episode: { startedOn: '2015-01-01', endedOn: null, method: '<img src=x>', expectedEffect: 'none' },
+      index: 0,
+    });
+    expect(html).not.toContain('<img');
+  });
+});

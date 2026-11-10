@@ -414,6 +414,9 @@ function editEpisodeAt(index) {
   const episode = (openDoc.birthControl ?? [])[index];
   if (episode === undefined) return;
   el('episode-form-host').innerHTML = renderEpisodeForm({ episode, index });
+  // The list can be long enough that the form lands off-screen, which is how
+  // a working Edit button read as a broken one.
+  el('episode-form-host').scrollIntoView({ block: 'nearest' });
 }
 
 // Opens a date picker instead of asking her to type a date into a prompt.

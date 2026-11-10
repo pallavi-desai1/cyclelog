@@ -221,3 +221,78 @@ describe('episodeAt', () => {
     expect(episodeAt(withEpisodes, '2015-12-31').method).toBe('pill');
   });
 });
+
+describe('episodeAt when two methods overlap', () => {
+  // She asked for overlap to be allowed: a method runs until the day it came
+  // out, and the next one can start that same day. The resolution rule then
+  // decides which one a date belongs to, and it must be the one most recently
+  // started — returning the first match in a list sorted by start date meant
+  // the OLDER method silently governed every prediction on an overlapping
+  // day, which is the opposite of what recording a change means.
+  const overlapping = {
+    birthControl: [
+      { startedOn: '2015-01-01', endedOn: '2015-06-30', method: 'implant', expectedEffect: 'suppress' },
+      { startedOn: '2015-06-30', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+    ],
+  };
+
+  it('gives the changeover day to the method that just started', () => {
+    expect(episodeAt(overlapping, '2015-06-30').method).toBe('pill');
+  });
+
+  it('still gives earlier days to the method she was on', () => {
+    expect(episodeAt(overlapping, '2015-06-29').method).toBe('implant');
+  });
+
+  it('and later days to the new one', () => {
+    expect(episodeAt(overlapping, '2015-07-01').method).toBe('pill');
+  });
+
+  it('picks the latest start even when the ranges overlap by months', () => {
+    const wide = {
+      birthControl: [
+        { startedOn: '2015-01-01', endedOn: '2015-12-31', method: 'implant', expectedEffect: 'suppress' },
+        { startedOn: '2015-06-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+      ],
+    };
+    expect(episodeAt(wide, '2015-08-01').method).toBe('pill');
+    expect(episodeAt(wide, '2015-05-01').method).toBe('implant');
+  });
+
+  it('picks the latest start when two are open at once', () => {
+    const bothOpen = {
+      birthControl: [
+        { startedOn: '2015-01-01', endedOn: null, method: 'implant', expectedEffect: 'suppress' },
+        { startedOn: '2015-06-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
+      ],
+    };
+    expect(episodeAt(bothOpen, '2015-08-01').method).toBe('pill');
+  });
+
+  it('is unaffected by the order they happen to be stored in', () => {
+    const reversed = { birthControl: [...overlapping.birthControl].reverse() };
+    expect(episodeAt(reversed, '2015-06-30').method).toBe('pill');
+    expect(episodeAt(reversed, '2015-06-29').method).toBe('implant');
+  });
+});
+
+describe('episodeAt when two methods share a start date', () => {
+  // Ending a method and replacing it on the same day gives both the same
+  // startedOn, so "latest start" cannot separate them. The one still in use
+  // takes the day; otherwise the answer came down to stored order.
+  const sameDay = {
+    birthControl: [
+      { startedOn: '2015-02-01', endedOn: '2015-02-01', method: 'pill', expectedEffect: 'regulate' },
+      { startedOn: '2015-02-01', endedOn: null, method: 'copper IUD', expectedEffect: 'none' },
+    ],
+  };
+
+  it('gives the day to the method still in use', () => {
+    expect(episodeAt(sameDay, '2015-02-01').method).toBe('copper IUD');
+  });
+
+  it('answers the same whichever order they are stored in', () => {
+    const reversed = { birthControl: [...sameDay.birthControl].reverse() };
+    expect(episodeAt(reversed, '2015-02-01').method).toBe('copper IUD');
+  });
+});

@@ -3,7 +3,7 @@
 // opening another needs no migration and no code change. These are the
 // operations Settings exposes. Pure functions over the document, like
 // src/edit.js is for days — no DOM, no storage, no clock.
-import { parseISO, addDays } from './dates.js';
+import { parseISO } from './dates.js';
 
 // The three the prediction prior in src/episodes.js knows (SIGMA_BY_EFFECT).
 // Any other value would fall back to the widest prior silently, so it is
@@ -50,16 +50,13 @@ export function validateEpisode(episode, { existing = [], ignoreIndex = null } =
     return 'It cannot end before it started.';
   }
 
-  const candidate = { startedOn, endedOn: endedOn === '' ? null : endedOn };
-  for (const [index, other] of existing.entries()) {
-    if (index === ignoreIndex) continue;
-    if (overlaps(candidate, other)) {
-      return other.endedOn === null
-        ? `That overlaps the ${other.method} you are still on, which started ${other.startedOn}.`
-        : `That overlaps the ${other.method} from ${other.startedOn} to ${other.endedOn}.`;
-    }
-  }
-
+  // Overlap is allowed, at her request. It used to be refused because
+  // episodeAt returned the first match in a list sorted by start date, so an
+  // overlapping day silently followed the OLDER method — the opposite of what
+  // recording a change means. episodeAt now resolves to the most recently
+  // started episode covering a date, which is what makes overlap safe rather
+  // than merely permitted. `existing` and `ignoreIndex` stay in the signature
+  // because the callers pass them and a future rule may need them again.
   return null;
 }
 
@@ -111,11 +108,11 @@ export function removeEpisode(doc, index) {
 }
 
 // What a method change actually is (spec §3.1): close one episode, open the
-// next. Doing it as two separate edits means picking the dates so they do not
-// overlap — end on the 5th and start on the 5th is what a person means by "I
-// changed on the 5th", and it is precisely what the overlap rule refuses. So
-// this takes the one date she knows and derives both halves: the new method
-// starts that day, the old one ends the day before.
+// next. Doing it as two separate edits means entering the same date twice and
+// keeping the two halves consistent by hand. This takes the one date she
+// knows and derives both: the old method runs UNTIL that date and the new one
+// starts ON it, so they share that day. Overlap is allowed, and episodeAt
+// gives a shared day to the method that just started.
 export function switchMethod(doc, { changedOn, method, expectedEffect }) {
   if (!isRealDate(changedOn ?? '')) throw new Error('Give the date you changed, as a real date.');
   const name = (method ?? '').trim();
@@ -136,16 +133,21 @@ export function switchMethod(doc, { changedOn, method, expectedEffect }) {
   // One day is the smallest episode this can produce; a change on or before
   // the day the old method started is not a change, it is a correction, and
   // Edit is where that belongs.
-  if (changedOn <= open.startedOn) {
+  // Only a date before the start is nonsense now. With an inclusive end,
+  // changing on the same day it started is a legal one-day episode.
+  if (changedOn < open.startedOn) {
     throw new Error(
-      `You started the ${open.method} on ${open.startedOn}, so the change has to be after that. `
+      `You started the ${open.method} on ${open.startedOn}, so it cannot have ended before that. `
       + 'Use Edit to correct that date instead.',
     );
   }
 
+  // The change date itself, not the day before: "the method goes until the day
+  // I said it got taken out." The two episodes then share that one day, and
+  // episodeAt gives it to the one that just started.
   const closed = updateEpisode(doc, openIndex, {
     ...open,
-    endedOn: addDays(changedOn, -1),
+    endedOn: changedOn,
   });
   return addEpisode(closed, {
     startedOn: changedOn, endedOn: null, method: name, expectedEffect,

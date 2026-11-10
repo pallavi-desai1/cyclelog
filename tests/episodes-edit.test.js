@@ -3,6 +3,7 @@ import {
   EFFECTS, validateEpisode, addEpisode, updateEpisode, endEpisode, removeEpisode,
   switchMethod,
 } from '../src/episodes-edit.js';
+import { episodeAt } from '../src/cycles.js';
 
 const doc = () => ({
   version: 1,
@@ -66,32 +67,34 @@ describe('validateEpisode', () => {
     )).toMatch(/end/i);
   });
 
-  // Review Focus 3: currentEpisode resolves a date to ONE episode. Two that
-  // overlap make that answer arbitrary, and every prediction downstream of it
-  // silently wrong.
-  it('rejects an episode overlapping one that already exists', () => {
+  // Reversed deliberately, at her request: "if there is overlap between two
+  // methods, it's fine." It was refused because episodeAt returned the first
+  // match, so an overlapping day silently followed the OLDER method. That
+  // resolution rule now picks the most recently started episode, which is
+  // what makes overlap safe to allow rather than merely permitted.
+  it('allows an episode overlapping one that already exists', () => {
     expect(validateEpisode(
       { startedOn: '2015-03-01', endedOn: '2015-04-01', method: 'pill', expectedEffect: 'regulate' },
       { existing: existing() },
-    )).toMatch(/overlap/i);
+    )).toBeNull();
   });
 
-  it('rejects a new open-ended episode when one is already open', () => {
+  it('allows a new open-ended episode even when one is already open', () => {
     expect(validateEpisode(
       { startedOn: '2015-09-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' },
       { existing: existing() },
-    )).toMatch(/overlap|still current/i);
+    )).toBeNull();
   });
 
   // The different-method branch: a second open episode must be refused
   // whatever it is called. currentEpisode() returns the first match in a
   // list sorted by start date, so two open episodes do not mean "both
   // apply" — they mean the newer one is silently ignored.
-  it('rejects a second open episode even when the method differs', () => {
+  it('allows a second open episode whatever it is called', () => {
     expect(validateEpisode(
       { startedOn: '2015-09-01', endedOn: null, method: 'copper IUD', expectedEffect: 'none' },
       { existing: existing() },
-    )).toMatch(/overlap|still current/i);
+    )).toBeNull();
   });
 
   it('lets an episode being edited overlap only itself', () => {
@@ -127,6 +130,17 @@ describe('addEpisode', () => {
       { startedOn: '2015-07-01', endedOn: null, method: '  pill  ', expectedEffect: 'regulate' },
     );
     expect(after.birthControl[0].method).toBe('pill');
+  });
+
+  it('stores an overlapping episode now that overlap is allowed', () => {
+    const before = {
+      version: 1, days: {}, spans: [], gaps: [],
+      birthControl: [{ startedOn: '2015-01-01', endedOn: null, method: 'pill', expectedEffect: 'regulate' }],
+    };
+    const after = addEpisode(before, {
+      startedOn: '2015-06-01', endedOn: null, method: 'copper IUD', expectedEffect: 'none',
+    });
+    expect(after.birthControl).toHaveLength(2);
   });
 
   it('refuses an invalid episode rather than storing it', () => {
@@ -199,10 +213,10 @@ describe('updateEpisode', () => {
     expect(after.birthControl[1].method).toBe('mini pill');
   });
 
-  it('refuses an edit that would overlap a different episode', () => {
+  it('allows an edit that overlaps a different episode', () => {
     expect(() => updateEpisode(doc(), 1, {
       startedOn: '2015-03-01', endedOn: null, method: 'pill', expectedEffect: 'regulate',
-    })).toThrow();
+    })).not.toThrow();
   });
 });
 
@@ -233,14 +247,26 @@ describe('switchMethod', () => {
   // and it is exactly what the overlap rule refuses — so doing it by hand
   // means working out an off-by-one yourself. One date in, both halves
   // consistent out.
-  it('closes the method she was on and opens the new one from that date', () => {
+  // Her instruction: "make it such that the method goes until the day I said
+  // it got taken out, not that it stops a day earlier." So the old method's
+  // endedOn IS the change date, the two overlap on that one day, and
+  // episodeAt gives the day to the one that just started.
+  it('runs the old method until the day she gave, and starts the new one that day', () => {
     const after = switchMethod(onPill(), {
       changedOn: '2015-11-05', method: 'copper IUD', expectedEffect: 'none',
     });
     expect(after.birthControl).toEqual([
-      { startedOn: '2015-02-01', endedOn: '2015-11-04', method: 'pill', expectedEffect: 'regulate' },
+      { startedOn: '2015-02-01', endedOn: '2015-11-05', method: 'pill', expectedEffect: 'regulate' },
       { startedOn: '2015-11-05', endedOn: null, method: 'copper IUD', expectedEffect: 'none' },
     ]);
+  });
+
+  it('gives the shared day to the method that just started', () => {
+    const after = switchMethod(onPill(), {
+      changedOn: '2015-11-05', method: 'copper IUD', expectedEffect: 'none',
+    });
+    expect(episodeAt(after, '2015-11-05').method).toBe('copper IUD');
+    expect(episodeAt(after, '2015-11-04').method).toBe('pill');
   });
 
   it('produces a document the overlap rule accepts', () => {
@@ -262,13 +288,22 @@ describe('switchMethod', () => {
     ]);
   });
 
-  it('refuses a change date on or before the method it would close', () => {
-    expect(() => switchMethod(onPill(), {
-      changedOn: '2015-02-01', method: 'x', expectedEffect: 'none',
-    })).toThrow(/after/i);
+  it('refuses a change date before the method it would close ever started', () => {
     expect(() => switchMethod(onPill(), {
       changedOn: '2015-01-01', method: 'x', expectedEffect: 'none',
-    })).toThrow(/after/i);
+    })).toThrow(/cannot have ended before/i);
+  });
+
+  // Allowed now that the end date is inclusive: she started it and stopped it
+  // on the same day, which is a real one-day episode rather than an error.
+  it('allows a change on the very day the old method started', () => {
+    const after = switchMethod(onPill(), {
+      changedOn: '2015-02-01', method: 'x', expectedEffect: 'none',
+    });
+    expect(after.birthControl[0]).toEqual({
+      startedOn: '2015-02-01', endedOn: '2015-02-01', method: 'pill', expectedEffect: 'regulate',
+    });
+    expect(episodeAt(after, '2015-02-01').method).toBe('x');
   });
 
   it('refuses a change date that is not a real date, and names the problem', () => {

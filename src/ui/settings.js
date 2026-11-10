@@ -60,8 +60,16 @@ export function renderEpisodeForm({ episode = null, index = null } = {}) {
   const value = field => (episode === null ? '' : escapeHtml(episode[field] ?? ''));
   const options = effectOptions(episode === null ? null : episode.expectedEffect);
 
+  // A heading, because this form and the add form share one host: without it
+  // tapping Edit changed some values far down the screen and looked like
+  // nothing had happened.
+  const heading = episode === null
+    ? 'Add a method'
+    : `Edit the ${escapeHtml(episode.method)}`;
+
   return [
     `<div id="episode-form" data-episode-index="${index === null ? '' : index}">`,
+    `<h4>${heading}</h4>`,
     '<label for="episode-started">Started on</label>',
     `<input id="episode-started" type="date" value="${value('startedOn')}">`,
     '<label for="episode-ended">Ended on (leave empty if you are still on it)</label>',
@@ -95,8 +103,8 @@ export function renderBackupWarning(lastBackup, todayISO) {
 export function renderSwitchForm({ current = null, todayISO }) {
   const closing = current === null
     ? '<p class="switch-note">You are not recording a method at the moment, so this just starts one.</p>'
-    : `<p class="switch-note">This ends the ${escapeHtml(current.method)} the day before, `
-      + 'and starts the new one on the date you give.</p>';
+    : `<p class="switch-note">This runs the ${escapeHtml(current.method)} until that date `
+      + 'and starts the new one on it. The day itself counts as the new method.</p>';
 
   return [
     '<div id="switch-form">',

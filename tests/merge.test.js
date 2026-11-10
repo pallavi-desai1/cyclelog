@@ -307,12 +307,16 @@ describe('the Settings re-import rule for birth control', () => {
     expect(merged.birthControl[0].endedOn).toBeNull();
   });
 
-  it('the model rejects the shape mergeIntoDocument alone produces', () => {
+  // The rationale changed, not the rule. Overlap is allowed now, so the
+  // merge's output is no longer an invalid shape — what makes it wrong is
+  // that an export marks every method as still current, so merging one
+  // REOPENS a method she had ended and her hand-set end date is lost. That is
+  // why Settings keeps her own section instead.
+  it('the merge alone reopens a method she had already ended', () => {
     const merged = mergeIntoDocument(hers(), incoming());
-    const problems = merged.birthControl.map((episode, index) => validateEpisode(
-      episode, { existing: merged.birthControl, ignoreIndex: index },
-    ));
-    expect(problems.some(problem => problem !== null)).toBe(true);
+    const implant = merged.birthControl.find(episode => episode.method === 'implant');
+    expect(implant.endedOn, 'her end date is discarded by the merge').toBeNull();
+    expect(hers().birthControl.find(episode => episode.method === 'implant').endedOn).toBe('2015-06-01');
   });
 
   it('restoring her own section leaves exactly one open episode', () => {

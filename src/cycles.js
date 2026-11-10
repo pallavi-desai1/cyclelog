@@ -5,13 +5,35 @@ const FLOW_RANK = { light: 1, medium: 2, heavy: 3 };
 // Returns the first episode containing `iso`, which is correct only while
 // episodes do not overlap. Nothing enforces that here; the screen that lets a
 // user add and end episodes is where overlap must be prevented.
+// `endedOn` is inclusive: a method runs until and including the day it came
+// out. Overlap between two methods is allowed, so more than one episode can
+// cover a date — the one most recently STARTED wins. Returning the first
+// match instead meant the older method governed every prediction on an
+// overlapping day, which is the opposite of what recording a change means,
+// and it depended on the stored order to boot.
+const isOpen = episode => episode.endedOn === null || episode.endedOn === undefined;
+
+// Which of two episodes covering the same date takes it. Later start first;
+// then, when two share a start date — which happens whenever a method is
+// ended and replaced on the same day — the one still in use. Without that
+// second rule the winner came down to stored order, so recording a change on
+// the day the old method began left the app reporting the method she had just
+// stopped.
+function governs(episode, incumbent) {
+  if (episode.startedOn !== incumbent.startedOn) return episode.startedOn > incumbent.startedOn;
+  if (isOpen(episode) !== isOpen(incumbent)) return isOpen(episode);
+  return true;
+}
+
 export function episodeAt(doc, iso) {
+  let latest = null;
   for (const episode of doc.birthControl ?? []) {
     const started = episode.startedOn <= iso;
-    const ended = episode.endedOn !== null && episode.endedOn !== undefined && episode.endedOn < iso;
-    if (started && !ended) return episode;
+    const ended = !isOpen(episode) && episode.endedOn < iso;
+    if (!started || ended) continue;
+    if (latest === null || governs(episode, latest)) latest = episode;
   }
-  return null;
+  return latest;
 }
 
 // Inclusive on both ends, deliberately. A stricter open-interval rule
