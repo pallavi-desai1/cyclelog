@@ -83,25 +83,67 @@ describe('the summary card', () => {
     expect(render(doc(SUPPRESS), '2015-07-15')).toContain('83 days');
   });
 
-  it('reports the counterfactual in the past tense, never as "late"', () => {
-    const html = render(doc(SUPPRESS), '2015-07-15');
-    expect(html).toContain('2015-06-18');
-    expect(html).toMatch(/would have/i);
-    expect(html).not.toMatch(/ghost/i);
+  it('drops the line comparing her to a cycle without birth control', () => {
+    for (const html of [render(doc(SUPPRESS), '2015-07-15'), render(doc(EARLY_PILL), '2015-04-20')]) {
+      expect(html).not.toContain('Off birth control');
+      expect(html).not.toMatch(/would have/i);
+      expect(html).not.toMatch(/ghost/i);
+    }
   });
 
-  it('omits the counterfactual-past line while it is still upcoming', () => {
-    expect(render(doc(EARLY_PILL), '2015-04-20')).not.toMatch(/would have/i);
-  });
-
-  it('shows the mean shift once there is divergence to report', () => {
+  // buildSummary still computes the shift, for the Insights screen.
+  it('no longer prints the shift against the natural cycle', () => {
     const bled = doc(EARLY_PILL);
     bled.spans.push({ start: '2015-04-27', end: null, source: 'test' });
-    expect(render(bled, '2015-05-10')).toMatch(/\+4\.0 days/);
+    expect(buildSummary(bled, '2015-05-10').divergence.meanShift).not.toBeNull();
+    expect(render(bled, '2015-05-10')).not.toMatch(/compared with/i);
   });
 
-  it('omits the shift line when there is no divergence yet', () => {
-    expect(render(doc(SUPPRESS), '2015-07-15')).not.toMatch(/compared with/i);
+  describe('the phase line', () => {
+    const caveat = { fixed: 'FIXED COPY', uncertainty: 'UNCERTAIN COPY' };
+    const withPhase = phase => renderSummary({ ...buildSummary(doc(), '2015-04-20'), phase });
+
+    it('names the phase she is in', () => {
+      const html = withPhase({ name: 'luteal', cycleDay: 19, window: null, fromTest: false, caveat });
+      expect(html).toMatch(/Luteal/);
+      expect(html).toContain('Day 19');
+    });
+
+    it('prints no phase line when the phase is unknown', () => {
+      const html = withPhase({ name: 'unknown', cycleDay: null, window: null, fromTest: false, caveat });
+      expect(html).not.toMatch(/Unknown/i);
+      expect(html).not.toContain('class="phase"');
+    });
+
+    it('prints the caveat beside a fertile phase, and not beside a luteal one', () => {
+      const fertile = withPhase({ name: 'fertile', cycleDay: 12, window: null, fromTest: false, caveat });
+      expect(fertile).toContain('FIXED COPY');
+      expect(fertile).toContain('UNCERTAIN COPY');
+      expect(fertile).toMatch(/predicted/i);
+      const luteal = withPhase({ name: 'luteal', cycleDay: 19, window: null, fromTest: false, caveat });
+      expect(luteal).not.toContain('FIXED COPY');
+    });
+  });
+
+  describe('a next date moved by a positive test', () => {
+    const withAdapted = adapted => renderSummary({ ...buildSummary(doc(), '2015-04-20'), adapted });
+
+    it('says where the date came from instead of printing a percentage', () => {
+      const html = withAdapted({ available: true, date: '2015-04-05', fromTest: true, confidence: null });
+      expect(html).toContain('from your positive ovulation test');
+      expect(html).not.toMatch(/% confident/);
+    });
+
+    it('prints no percentage even if one is handed over with a test-moved date', () => {
+      const html = withAdapted({ available: true, date: '2015-04-05', fromTest: true, confidence: 70 });
+      expect(html).not.toMatch(/% confident|70%/);
+    });
+
+    it('still prints the confidence on a date from the model', () => {
+      const html = withAdapted({ available: true, date: '2015-04-05', fromTest: false, confidence: 70 });
+      expect(html).toContain('70% confident');
+      expect(html).not.toContain('positive ovulation test');
+    });
   });
 
   it('says so plainly when nothing has been logged', () => {
@@ -140,6 +182,7 @@ describe('the summary card', () => {
       method: null,
       headline: { kind: 'unavailable', text: 'Not enough data yet', daysLate: null },
       adapted: { available: false },
+      phase: { name: 'unknown', cycleDay: NaN, window: null, fromTest: false, caveat: null },
       baseline: { available: false },
       divergence: { meanShift: NaN },
     };
@@ -169,8 +212,10 @@ describe('the calendar', () => {
     {
       month: overrides.month ?? '2015-03',
       todayISO: overrides.todayISO ?? '2015-03-26',
-      adaptedDate: overrides.adaptedDate ?? '2015-03-31',
-      baselineDates: overrides.baselineDates ?? ['2015-03-29'],
+      // The projection must fall after the next period, or monthGrid clips it.
+      adaptedDate: overrides.adaptedDate ?? '2015-03-28',
+      upcomingDates: overrides.upcomingDates ?? ['2015-03-30'],
+      windows: overrides.windows ?? [],
     },
   );
   const html = (overrides = {}) => renderCalendar(grid(overrides));
@@ -213,16 +258,19 @@ describe('the calendar', () => {
     expect(html()).toContain('cal-pms');
   });
 
-  // §10.3: the adapted prediction is solid, the counterfactual dashed. They
+  // §10.3: the adapted prediction is solid, a later projection dashed. They
   // must be separate classes, or the two become indistinguishable in CSS.
-  it('marks the prediction and the counterfactual with different classes', () => {
+  it('marks the prediction and the upcoming projection with different classes', () => {
     expect(html()).toContain('cal-predicted');
-    expect(html()).toContain('cal-baseline');
+    expect(html()).toContain('cal-upcoming');
   });
 
-  it('can mark both on a single day', () => {
-    const both = html({ adaptedDate: '2015-03-31', baselineDates: ['2015-03-31'] });
-    expect(both).toMatch(/class="[^"]*cal-predicted[^"]*cal-baseline|class="[^"]*cal-baseline[^"]*cal-predicted/);
+  it('gives the next period the solid mark alone, never both', () => {
+    const both = html({ adaptedDate: '2015-03-31', upcomingDates: ['2015-03-31'] });
+    // The legend always carries the swatch classes; only cells are in question.
+    const cellsOnly = both.slice(0, both.indexOf('<ul class="cal-legend">'));
+    expect(cellsOnly).toContain('cal-predicted');
+    expect(cellsOnly).not.toContain('cal-upcoming');
   });
 
   // Every state encoded by colour or shape is also encoded in words, so the
@@ -233,7 +281,8 @@ describe('the calendar', () => {
     expect(labels).toMatch(/spotting/);
     expect(labels).toMatch(/PMS/);
     expect(labels).toMatch(/period expected/);
-    expect(labels).toMatch(/without birth control/);
+    expect(labels).toMatch(/period expected later/);
+    expect(labels).not.toMatch(/birth control/);
     expect(labels).toMatch(/today/);
   });
 
@@ -262,7 +311,8 @@ describe('the day panel', () => {
     logged: [{ label: 'Flow', value: 'heavy' }, { label: 'Notes', value: 'rough day' }],
     source: 'clue', isApproximate: false,
     method: { method: 'pill', startedOn: '2015-02-01' },
-    predicted: false, baseline: false,
+    predicted: false, upcoming: false,
+    isFertile: false, isDescent: false, fromTest: false, caveat: null,
   };
   const detail = (overrides = {}) => ({ ...base, ...overrides });
 
@@ -308,10 +358,55 @@ describe('the day panel', () => {
     expect(renderDay(detail({ predicted: true }))).toMatch(/period expected/i);
   });
 
-  it('says the counterfactual in the past tense, never as lateness', () => {
-    const html = renderDay(detail({ baseline: true }));
-    expect(html).toMatch(/without birth control/i);
-    expect(html).not.toMatch(/late/i);
+  it('says a period is expected later, never as lateness', () => {
+    const html = renderDay(detail({ upcoming: true }));
+    expect(html).toContain('Period expected later');
+    expect(html).not.toMatch(/birth control|late\b/i);
+  });
+
+  const fertileCaveat = { fixed: 'FIXED', uncertainty: null };
+
+  it('says what a fertile day is, and carries the caveat', () => {
+    const html = renderDay({ ...detail(), isFertile: true, caveat: fertileCaveat });
+    expect(html).toContain('Fertile window — predicted');
+    expect(html).toContain('FIXED');
+  });
+
+  it('prints the uncertainty line when it is given', () => {
+    const html = renderDay({ ...detail(), isFertile: true, caveat: { fixed: 'FIXED', uncertainty: 'UNSURE' } });
+    expect(html).toContain('UNSURE');
+  });
+
+  it('prints no caveat and no fertile line on a day that is not fertile', () => {
+    const html = renderDay({ ...detail(), caveat: fertileCaveat });
+    expect(html).not.toContain('FIXED');
+    expect(html).not.toContain('Fertile window');
+  });
+
+  it('names both facts on a day that is bleeding and predicted fertile', () => {
+    const html = renderDay({ ...detail(), isPeriod: true, periodDay: 4, cycleDay: 4, isFertile: true, caveat: fertileCaveat });
+    expect(html).toMatch(/day 4 of your period/);
+    expect(html).toContain('Fertile window — predicted');
+  });
+
+  it('says the egg is expected to descend', () => {
+    expect(renderDay({ ...detail(), isFertile: true, isDescent: true, caveat: fertileCaveat }))
+      .toContain('Egg expected to descend on this day');
+  });
+
+  it('says when the window was moved by a positive test', () => {
+    expect(renderDay({ ...detail(), isFertile: true, fromTest: true, caveat: fertileCaveat }))
+      .toContain('Moved here by a positive ovulation test');
+  });
+
+  it('never suggests the days around a fertile day are safe', () => {
+    const html = renderDay({ ...detail(), isFertile: true, isDescent: true, caveat: fertileCaveat });
+    expect(html).not.toMatch(/safe day|not fertile|infertile/i);
+  });
+
+  it('is identical in read-only mode but for the edit button', () => {
+    const open = { ...detail(), isFertile: true, isDescent: true, caveat: fertileCaveat };
+    expect(renderDay(open, { canEdit: false })).toBe(renderDay(open).replace(/<button id="edit-day"[^<]*<\/button>/, ''));
   });
 
   it('names the method in force that day', () => {
@@ -384,7 +479,8 @@ describe('calendar colour coding', () => {
     const html = renderCalendar(grid({}));
     for (const label of [
       'Light', 'Medium', 'Heavy', 'Spotting', 'PMS', 'Positive test',
-      'Period expected', 'Would have been',
+      'Period expected', 'Period expected later',
+      'Fertile window (predicted)', 'Egg expected to descend',
     ]) {
       expect(html).toContain(label);
     }
@@ -394,15 +490,79 @@ describe('calendar colour coding', () => {
     const legend = renderCalendar(grid({})).match(/<ul class="cal-legend">[\s\S]*<\/ul>/)[0];
     for (const className of [
       'cal-swatch-light', 'cal-swatch-medium', 'cal-swatch-heavy',
-      'cal-spotting', 'cal-pms', 'cal-test', 'cal-predicted', 'cal-baseline',
+      'cal-spotting', 'cal-pms', 'cal-test', 'cal-predicted', 'cal-upcoming',
+      'cal-fertile', 'cal-descent',
     ]) {
       expect(legend, className).toContain(className);
     }
   });
 
-  it('marks every counterfactual day of the month, not just one', () => {
-    const html = renderCalendar(grid({}, { baselineDates: ['2015-03-05', '2015-03-26'] }));
-    expect((html.match(/cal-baseline/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  it('marks every upcoming day of the month, not just one', () => {
+    const html = renderCalendar(grid({}, { upcomingDates: ['2015-03-05', '2015-03-26'] }));
+    expect((html.match(/cal-upcoming/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  describe('fertile marks', () => {
+    const windows = [{ from: '2015-03-11', descent: '2015-03-15', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: false }];
+    const caveat = { fixed: 'FIXED COPY', uncertainty: 'UNCERTAIN COPY' };
+    const count = (html, re) => (html.match(re) ?? []).length;
+
+    it('puts the fertile and descent classes on the right cells', () => {
+      const html = renderCalendar(grid({}, { windows }));
+      // Six cells plus the legend swatches.
+      expect(count(html, /cal-fertile/g)).toBe(6 + 2);
+      expect(count(html, /cal-descent/g)).toBe(1 + 1);
+      expect(html).toMatch(/class="[^"]*cal-fertile[^"]*cal-descent[^"]*" data-date="2015-03-15"|class="[^"]*cal-descent[^"]*" data-date="2015-03-15"/);
+    });
+
+    it('never puts the descent class on a cell that is not fertile', () => {
+      const html = renderCalendar(grid({}, { windows }));
+      for (const [, classes] of html.matchAll(/<button type="button" class="([^"]*)"/g)) {
+        if (classes.includes('cal-descent')) expect(classes).toContain('cal-fertile');
+      }
+    });
+
+    it('names every new mark in the cell’s aria-label', () => {
+      const html = renderCalendar(grid({}, { windows }));
+      expect(html).toContain('fertile window, predicted');
+      expect(html).toContain('egg expected to descend');
+    });
+
+    it('says when a window was moved by a test', () => {
+      const moved = [{ ...windows[0], fromTest: true }];
+      expect(renderCalendar(grid({}, { windows: moved })))
+        .toContain('moved here by a positive ovulation test');
+      expect(renderCalendar(grid({}, { windows }))).not.toContain('moved here');
+    });
+
+    it('relabels the dashed mark as a period expected later', () => {
+      const html = renderCalendar(grid({}, { upcomingDates: ['2015-03-26'] }));
+      expect(html).toContain('Period expected later');
+      expect(html).not.toContain('without birth control');
+    });
+
+    it('prints the caveat under the legend whenever a fertile mark is showing', () => {
+      const html = renderCalendar(grid({}, { windows }), { caveat });
+      expect(html).toContain('FIXED COPY');
+      expect(html).toContain('UNCERTAIN COPY');
+      expect(html.indexOf('cal-legend')).toBeLessThan(html.indexOf('FIXED COPY'));
+    });
+
+    it('omits the caveat when no fertile mark is on screen', () => {
+      const html = renderCalendar(grid({}, { windows: [] }), { caveat: { fixed: 'FIXED COPY', uncertainty: null } });
+      expect(html).not.toContain('FIXED COPY');
+    });
+
+    it('prints the caveat exactly as given, not recomputed', () => {
+      const html = renderCalendar(grid({}, { windows }), { caveat: { fixed: 'ONLY THIS', uncertainty: null } });
+      expect(html).toContain('ONLY THIS');
+      expect(html).not.toContain('UNCERTAIN COPY');
+    });
+
+    it('never renders anything suggesting the unmarked days are safe', () => {
+      const html = renderCalendar(grid({}, { windows }), { caveat: { fixed: 'f', uncertainty: null } });
+      expect(html).not.toMatch(/safe day|not fertile|infertile/i);
+    });
   });
 
   it('still balances its markup with the legend attached', () => {
@@ -465,7 +625,8 @@ describe('renderDay on a read-only screen', () => {
     cycleDay: 2, periodDay: 2, isPeriod: true,
     hasEntry: true, logged: [{ label: 'Flow', value: 'heavy' }],
     source: 'manual', isApproximate: false, method: null,
-    predicted: false, baseline: false,
+    predicted: false, upcoming: false,
+    isFertile: false, isDescent: false, fromTest: false, caveat: null,
   };
 
   // Review Focus 5 again, one layer lower: drawViewerDay never touches the

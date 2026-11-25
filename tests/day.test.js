@@ -175,10 +175,41 @@ describe('context for the day', () => {
     expect(on('2015-03-26').predicted).toBe(false);
   });
 
-  it('marks the counterfactual day separately', () => {
-    const detail = on('2015-03-24', { baselineDates: ['2015-03-24'] });
-    expect(detail.baseline).toBe(true);
+  it('marks an upcoming projection separately', () => {
+    const detail = on('2015-03-24', { upcomingDates: ['2015-03-24'] });
+    expect(detail.upcoming).toBe(true);
     expect(detail.predicted).toBe(false);
+  });
+
+  it('reports a fertile day, the descent day, and a moved window', () => {
+    const windows = [{ from: '2015-03-11', descent: '2015-03-15', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: true }];
+    expect(on('2015-03-12', { windows })).toMatchObject({ isFertile: true, isDescent: false, fromTest: true });
+    expect(on('2015-03-15', { windows })).toMatchObject({ isFertile: true, isDescent: true });
+    expect(on('2015-03-17', { windows }).isFertile).toBe(false);
+  });
+
+  it('reports no test-moved window on a window that was not moved, or outside one', () => {
+    const windows = [{ from: '2015-03-11', descent: '2015-03-15', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: false }];
+    expect(on('2015-03-12', { windows }).fromTest).toBe(false);
+    const moved = [{ ...windows[0], fromTest: true }];
+    expect(on('2015-03-20', { windows: moved }).fromTest).toBe(false);
+  });
+
+  it('never reports descent on a day that is not fertile', () => {
+    const odd = [{ from: '2015-03-11', descent: '2015-03-20', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: false }];
+    const detail = on('2015-03-20', { windows: odd });
+    expect(detail.isFertile).toBe(false);
+    expect(detail.isDescent).toBe(false);
+  });
+
+  it('reports no fertile fields when no windows are given', () => {
+    expect(on('2015-03-12')).toMatchObject({ isFertile: false, isDescent: false, fromTest: false });
+  });
+
+  it('keeps the next period to its solid mark, as the grid does', () => {
+    const detail = on('2015-03-26', { adaptedDate: '2015-03-26', upcomingDates: ['2015-03-26'] });
+    expect(detail.predicted).toBe(true);
+    expect(detail.upcoming).toBe(false);
   });
 
   it('carries the date and its label', () => {

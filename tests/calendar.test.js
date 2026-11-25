@@ -175,7 +175,7 @@ describe('what was logged on a day', () => {
 describe('predictions on the grid', () => {
   const options = {
     month: '2015-04', todayISO: '2015-04-01',
-    adaptedDate: '2015-04-23', baselineDates: ['2015-04-20'],
+    adaptedDate: '2015-04-23', upcomingDates: ['2015-04-27'],
   };
 
   it('marks the adapted prediction', () => {
@@ -184,28 +184,30 @@ describe('predictions on the grid', () => {
     expect(cellFor(grid, '2015-04-22').predicted).toBe(false);
   });
 
-  // The counterfactual is a separate mark, never the same one: §10.3 wants it
+  // The upcoming projection is a separate mark, never the same one: it is
   // dashed against the adapted prediction's solid outline, so that the two are
   // distinguishable without relying on colour.
-  it('marks the counterfactual separately', () => {
+  it('marks an upcoming projection separately', () => {
     const grid = monthGrid(doc(), options);
-    expect(cellFor(grid, '2015-04-20').baseline).toBe(true);
-    expect(cellFor(grid, '2015-04-20').predicted).toBe(false);
-    expect(cellFor(grid, '2015-04-23').baseline).toBe(false);
+    expect(cellFor(grid, '2015-04-27').upcoming).toBe(true);
+    expect(cellFor(grid, '2015-04-27').predicted).toBe(false);
+    expect(cellFor(grid, '2015-04-23').upcoming).toBe(false);
   });
 
-  it('marks both on one day when they coincide', () => {
+  // Coincidence is possible for any date but the next period itself, which is
+  // clipped to the solid mark (see the clip test below).
+  it('marks both on one day when a later projection coincides with a prediction', () => {
     const grid = monthGrid(doc(), {
-      ...options, adaptedDate: '2015-04-23', baselineDates: ['2015-04-23'],
+      ...options, adaptedDate: '2015-04-23', upcomingDates: ['2015-04-23'],
     });
     const cell = cellFor(grid, '2015-04-23');
     expect(cell.predicted).toBe(true);
-    expect(cell.baseline).toBe(true);
+    expect(cell.upcoming).toBe(false);
   });
 
   it('marks nothing when there is no prediction', () => {
     const grid = monthGrid(doc(), { month: '2015-04', todayISO: '2015-04-01' });
-    expect(flat(grid).some(cell => cell.predicted || cell.baseline)).toBe(false);
+    expect(flat(grid).some(cell => cell.predicted || cell.upcoming)).toBe(false);
   });
 
   it('shows a prediction that falls in the padding of another month', () => {
@@ -218,16 +220,16 @@ describe('predictions on the grid', () => {
   });
 });
 
-describe('projectedDates — the counterfactual cadence', () => {
-  it('returns the ghost dates that fall inside a window', () => {
+describe('projectedDates — the cadence of upcoming periods', () => {
+  it('returns the projected dates that fall inside a window', () => {
     // 28-day cadence anchored on 1 January.
     expect(projectedDates('2015-01-01', 28, '2015-01-01', '2015-03-31'))
       .toEqual(['2015-01-29', '2015-02-26', '2015-03-26']);
   });
 
   // The anchor is a period that actually happened. Marking it as a
-  // counterfactual claims a prediction where there is an observation — and
-  // on the calendar it drew a ghost on a day she really bled.
+  // projection claims a prediction where there is an observation — and
+  // on the calendar it drew a dashed mark on a day she really bled.
   it('never marks the anchor itself', () => {
     expect(projectedDates('2015-01-01', 28, '2015-01-01', '2015-03-31'))
       .not.toContain('2015-01-01');
@@ -283,19 +285,19 @@ describe('projectedDates — the counterfactual cadence', () => {
   });
 });
 
-describe('the counterfactual across a whole month', () => {
-  const grid = (baselineDates) => monthGrid(doc(), {
-    month: '2015-03', todayISO: '2015-03-10', baselineDates,
+describe('upcoming projections across a whole month', () => {
+  const grid = (upcomingDates) => monthGrid(doc(), {
+    month: '2015-03', todayISO: '2015-03-10', upcomingDates,
   });
 
-  it('marks every ghost date given, not just the next one', () => {
+  it('marks every projected date given, not just the next one', () => {
     const marked = flat(grid(['2015-03-05', '2015-03-26']))
-      .filter(cell => cell.baseline).map(cell => cell.date);
+      .filter(cell => cell.upcoming).map(cell => cell.date);
     expect(marked).toEqual(['2015-03-05', '2015-03-26']);
   });
 
   it('marks none when the cadence is unknown', () => {
-    expect(flat(grid([])).some(cell => cell.baseline)).toBe(false);
+    expect(flat(grid([])).some(cell => cell.upcoming)).toBe(false);
   });
 });
 
@@ -389,5 +391,90 @@ describe('clampMonth', () => {
   // instance December of the final year when the range ends in August.
   it('handles the two-select combination that overshoots', () => {
     expect(clampMonth('2016-12', range)).toBe('2016-08');
+  });
+});
+
+describe('monthGrid fertile marks', () => {
+  const windows = [{ from: '2015-03-11', descent: '2015-03-15', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: false }];
+  const cells = grid => grid.weeks.flat();
+  const at = (grid, date) => cells(grid).find(c => c.date === date);
+
+  const grid = () => monthGrid({}, { month: '2015-03', todayISO: '2015-03-01', windows, upcomingDates: [] });
+
+  it('marks every day of the window', () => {
+    for (const d of ['2015-03-11', '2015-03-12', '2015-03-13', '2015-03-14', '2015-03-15', '2015-03-16']) {
+      expect(at(grid(), d).isFertile).toBe(true);
+    }
+  });
+
+  it('marks the descent day alone as descent', () => {
+    expect(at(grid(), '2015-03-15').isDescent).toBe(true);
+    expect(at(grid(), '2015-03-14').isDescent).toBe(false);
+  });
+
+  it('leaves days outside the window unmarked', () => {
+    expect(at(grid(), '2015-03-10').isFertile).toBe(false);
+    expect(at(grid(), '2015-03-17').isFertile).toBe(false);
+  });
+
+  it('reports a window moved by a test', () => {
+    const moved = [{ ...windows[0], fromTest: true }];
+    const g = monthGrid({}, { month: '2015-03', todayISO: '2015-03-01', windows: moved, upcomingDates: [] });
+    expect(at(g, '2015-03-15').fromTest).toBe(true);
+  });
+
+  it('does not report a test-moved window on a window that was not moved', () => {
+    expect(at(grid(), '2015-03-15').fromTest).toBe(false);
+  });
+
+  it('marks upcoming projections', () => {
+    const g = monthGrid({}, { month: '2015-03', todayISO: '2015-03-01', windows: [], upcomingDates: ['2015-03-26'] });
+    expect(at(g, '2015-03-26').upcoming).toBe(true);
+  });
+
+  it('defaults both new inputs to empty', () => {
+    const g = monthGrid({}, { month: '2015-03', todayISO: '2015-03-01' });
+    expect(cells(g).some(c => c.isFertile || c.upcoming)).toBe(false);
+  });
+
+  // The stylesheet's lone-descent fallback exists because CSS cannot enforce
+  // this. A descent bar on a day with no fertile fill reads as a fertile mark
+  // on a day that is not predicted fertile.
+  it('cannot mark descent on a day that is not fertile, even when handed an inconsistent window', () => {
+    const inconsistent = [{ from: '2015-03-11', descent: '2015-03-20', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: true }];
+    const g = monthGrid({}, { month: '2015-03', todayISO: '2015-03-01', windows: inconsistent });
+    expect(at(g, '2015-03-20').isFertile).toBe(false);
+    expect(at(g, '2015-03-20').isDescent).toBe(false);
+    expect(at(g, '2015-03-20').fromTest).toBe(false);
+    for (const c of cells(g)) expect(c.isDescent && !c.isFertile).toBe(false);
+  });
+
+  it('never marks a date on or before the next predicted period as upcoming', () => {
+    // The dashed mark means "and then roughly every N days after that". The
+    // next period has its own solid mark, and a dashed mark in a past month
+    // would stamp "period expected later" where real logged periods sit.
+    const g = monthGrid({}, {
+      month: '2015-03', todayISO: '2015-03-20', adaptedDate: '2015-03-26',
+      upcomingDates: ['2015-03-26', '2015-04-23'], windows: [],
+    });
+    const cell = g.weeks.flat().find(c => c.date === '2015-03-26');
+    expect(cell.predicted).toBe(true);
+    expect(cell.upcoming).toBe(false);
+  });
+
+  it('clips projections before the next predicted period too', () => {
+    const g = monthGrid({}, {
+      month: '2015-03', todayISO: '2015-03-20', adaptedDate: '2015-03-26',
+      upcomingDates: ['2015-03-05'], windows: [],
+    });
+    expect(at(g, '2015-03-05').upcoming).toBe(false);
+  });
+
+  it('still marks a projection after the next predicted period', () => {
+    const g = monthGrid({}, {
+      month: '2015-04', todayISO: '2015-03-20', adaptedDate: '2015-03-26',
+      upcomingDates: ['2015-04-23'], windows: [],
+    });
+    expect(at(g, '2015-04-23').upcoming).toBe(true);
   });
 });
