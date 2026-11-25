@@ -19,6 +19,18 @@
   --ink-on-flow: #2A0C33;
 
   --baseline: #B9A4D4;
+
+  /* The fertile window. Deep indigo, not pink, green or red: nothing here may
+     read as a traffic light, because an unmarked day means "not predicted
+     fertile", never "safe". It is DARK so it survives greyscale: the three
+     flow pinks span L* 48-87 and the gap between steps is only ~15, so no
+     light fill could clear 15 points from all of them. Measured against the
+     pinks (L* 86.9 / 69.7 / 47.9 / 56.4 for light, medium, heavy dot, heavy
+     fill): #4F3A7A is L* 29.6, 57.3 / 40.1 / 18.2 / 26.7 away. White ink on
+     it is 9.46:1. The descent day is a gold bar, 6.65:1 against the fill. */
+  --fertile: #4F3A7A;
+  --fertile-ink: #FFFFFF;
+  --descent: #FFD27A;
   --positive: #3F8F86;
   --spotting: #A9705B;
   --danger: #B3261E;
@@ -44,6 +56,11 @@
     --interactive: #E8799C;
     --danger: #F2B8B5;
     --baseline: #C9B6E4;
+    /* L* 32.2: 54.7 / 37.5 / 15.7 / 24.2 from the pinks; lifted a notch so
+       the fill stays visible on the near-black surface. */
+    --fertile: #563F83;
+    --fertile-ink: #FFFFFF;
+    --descent: #FFD27A;
     --line: #3A2630;
     --warn-bg: #3A2A18;
     --warn-ink: #F0C49A;
@@ -269,6 +286,11 @@ input { font-family: var(--font-body); }
   flex: none;
 }
 
+/* The predicted fertile window: a filled day, declared before the flow fills
+   so a day that bled keeps its flow colour. On such a day the window shows as
+   a corner wedge instead (below), so both facts are visible. */
+.cal-fertile { background: var(--fertile); color: var(--fertile-ink); }
+
 /* Period days are filled, so a month reads at a glance. The date number on
    top switches to a dark purple that clears 4.5:1 on all three fills. */
 .cal-flow-light { background: var(--flow-light); }
@@ -276,6 +298,12 @@ input { font-family: var(--font-body); }
 .cal-flow-heavy { background: var(--flow-heavy-fill); }
 
 .cal-period { color: var(--ink-on-flow); }
+
+/* A fertile day that also bled: the flow fill stays, the window is a corner
+   wedge. background-image only, so the flow colour underneath is untouched. */
+.cal-fertile.cal-period {
+  background-image: linear-gradient(135deg, var(--fertile) 0 32%, transparent 32%);
+}
 
 /* On a filled day the dot carries intensity by size alone, in the same ink
    as the number — a coloured dot on a coloured cell would disappear. */
@@ -287,9 +315,14 @@ input { font-family: var(--font-body); }
 
 .cal-predicted { border: 2px solid var(--interactive); }
 
+/* The day the temperature is predicted to fall: a bar across the top edge, so
+   it composes with a flow fill, a spotting ring, a PMS underline and the
+   predicted outline instead of replacing any of them. */
+.cal-descent { border-top: 5px solid var(--descent); }
+
 /* An outline rather than a border, so a day that is both predicted and the
    counterfactual shows both marks at once. */
-.cal-baseline { outline: 2px dashed var(--baseline); outline-offset: 2px; }
+.cal-upcoming { outline: 2px dashed var(--baseline); outline-offset: 2px; }
 
 .cal-cell:focus-visible { outline: 3px solid var(--interactive); outline-offset: 1px; }
 
@@ -314,7 +347,7 @@ input { font-family: var(--font-body); }
    bled: on such a day the fill stays, the dashed ring is added, and both
    facts show. Unscoped, it also put the dark ink of .cal-period onto a
    near-black cell in dark mode, which is how a date number vanished. */
-.cal-baseline:not(.cal-period) { background: #FFFFFF; }
+.cal-upcoming:not(.cal-period) { background: #FFFFFF; }
 
 .cal-pms { box-shadow: inset 0 -4px 0 var(--warning); }
 
@@ -352,8 +385,12 @@ input { font-family: var(--font-body); }
 
 @media (prefers-color-scheme: dark) {
   /* The ghost stays hollow rather than literally white, which would glare. */
-  .cal-baseline:not(.cal-period) { background: var(--surface); }
+  .cal-upcoming:not(.cal-period) { background: var(--surface); }
 }
+
+/* After every other background rule, so the window shows on a day that is also
+   upcoming, today or selected. A day that bled keeps its flow fill. */
+.cal-fertile:not(.cal-period) { background: var(--fertile); color: var(--fertile-ink); }
 
 /* The day editor. Controls inherit the global input/button styling; these
    rules cover the form's own layout. */

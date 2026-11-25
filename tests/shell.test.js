@@ -314,7 +314,7 @@ describe('calendar styling', () => {
       '.cal-dot', '.flow-light', '.flow-medium', '.flow-heavy',
       '.cal-swatch-light', '.cal-swatch-medium', '.cal-swatch-heavy',
       '.cal-flow-light', '.cal-flow-medium', '.cal-flow-heavy',
-      '.cal-spotting', '.cal-pms', '.cal-predicted', '.cal-baseline',
+      '.cal-spotting', '.cal-pms', '.cal-predicted', '.cal-upcoming',
     ]) {
       expect(hasSelector(selector), selector).toBe(true);
     }
@@ -322,7 +322,7 @@ describe('calendar styling', () => {
 
   it('draws the counterfactual dashed against a solid prediction outline', () => {
     expect(ruleBody('.cal-predicted')).toMatch(/solid/);
-    expect(ruleBody('.cal-baseline')).toMatch(/dashed/);
+    expect(ruleBody('.cal-upcoming')).toMatch(/dashed/);
   });
 
   it('scales the flow dot by intensity', () => {
@@ -468,7 +468,7 @@ describe('legend swatches', () => {
     const base = text.indexOf('.cal-swatch {');
     expect(base, '.cal-swatch base rule').toBeGreaterThan(-1);
     for (const selector of [
-      '.cal-spotting {', '.cal-predicted {', '.cal-baseline {',
+      '.cal-spotting {', '.cal-predicted {', '.cal-upcoming {',
     ]) {
       expect(text.indexOf(selector), selector).toBeGreaterThan(base);
     }
@@ -524,12 +524,12 @@ describe('a day that both bled and was a ghost', () => {
   // number disappeared.
   it('scopes the ghost fill away from bleeding days', () => {
     const text = cssRules();
-    expect(text).toMatch(/\.cal-baseline:not\(\.cal-period\)\s*\{[^}]*background/);
-    expect(text).not.toMatch(/(^|[\s,}])\.cal-baseline\s*\{[^}]*background/);
+    expect(text).toMatch(/\.cal-upcoming:not\(\.cal-period\)\s*\{[^}]*background/);
+    expect(text).not.toMatch(/(^|[\s,}])\.cal-upcoming\s*\{[^}]*background/);
   });
 
   it('keeps the dashed ring on such a day', () => {
-    expect(ruleBody('.cal-baseline')).toMatch(/dashed/);
+    expect(ruleBody('.cal-upcoming')).toMatch(/dashed/);
   });
 });
 
@@ -573,5 +573,65 @@ describe('the content security policy with sharing', () => {
 
   it('loads no Google script in the page', () => {
     expect(html()).not.toMatch(/gstatic|googleapis\.com\/.*\.js|firebasejs/);
+  });
+});
+
+describe('the fertile window and the descent day', () => {
+  // The owner is using a predicted fertile window to avoid pregnancy. An
+  // unmarked day means "not predicted fertile", never "safe", so nothing here
+  // may read as a traffic light, and the mark must survive greyscale.
+  const darkBlock = () => {
+    const text = css();
+    const at = text.indexOf('@media (prefers-color-scheme: dark)');
+    return balancedBodyAfter(text.slice(at), '@media (prefers-color-scheme: dark)');
+  };
+  const lightBlock = () => css().slice(0, css().indexOf('@media (prefers-color-scheme: dark)'));
+  const tokenIn = (block, token) => block.match(new RegExp(`${token}:\\s*(#[0-9A-Fa-f]{6})`))?.[1];
+  const lightness = hex => {
+    const [r, g, b] = [1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16) / 255)
+      .map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return y > 216 / 24389 ? 116 * Math.cbrt(y) - 16 : y * 24389 / 27;
+  };
+
+  it('defines the fertile and descent tokens in both schemes', () => {
+    for (const token of ['--fertile', '--fertile-ink', '--descent']) {
+      expect((css().match(new RegExp(`${token}:`, 'g')) ?? []).length).toBeGreaterThanOrEqual(2);
+      expect(tokenIn(lightBlock(), token), `${token} light`).toBeDefined();
+      expect(tokenIn(darkBlock(), token), `${token} dark`).toBeDefined();
+    }
+  });
+
+  it('draws the fertile window as a fill and the descent day as a mark that composes with it', () => {
+    expect(ruleBody('.cal-fertile')).toMatch(/background/);
+    expect(ruleBody('.cal-descent')).toMatch(/border|box-shadow|outline/);
+  });
+
+  it('keeps the dashed outline for forward projections under its new name', () => {
+    expect(ruleBody('.cal-upcoming')).toMatch(/dashed/);
+    expect(css()).not.toContain('cal-baseline');
+  });
+
+  it('does not use green or red for the fertile window', () => {
+    const fertile = css().match(/--fertile:\s*([^;]+);/g).join(' ');
+    expect(fertile).not.toMatch(/green|red|#[0-9a-f]*(?:0f0|f00)/i);
+    // Hex can hide a green or a red, so check the hue too.
+    for (const hex of fertile.match(/#[0-9A-Fa-f]{6}/g)) {
+      const [r, g, b] = [1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16));
+      expect(g > r && g > b, `${hex} is green-dominant`).toBe(false);
+      expect(r > g * 1.5 && r > b * 1.5, `${hex} is red-dominant`).toBe(false);
+    }
+  });
+
+  it('differs from every flow pink by at least 15 points of L* in greyscale, in both schemes', () => {
+    const flows = ['--flow-light', '--flow-medium', '--flow-heavy', '--flow-heavy-fill']
+      .map(token => tokenIn(lightBlock(), token));
+    for (const [scheme, block] of [['light', lightBlock()], ['dark', darkBlock()]]) {
+      const fertile = tokenIn(block, '--fertile');
+      for (const flow of flows) {
+        expect(Math.abs(lightness(fertile) - lightness(flow)), `${scheme} ${fertile} vs ${flow}`)
+          .toBeGreaterThanOrEqual(15);
+      }
+    }
   });
 });
