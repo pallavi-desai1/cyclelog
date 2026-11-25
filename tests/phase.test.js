@@ -91,6 +91,12 @@ describe('applyTestOverride', () => {
     });
   });
 
+  it('keeps the arithmetic window when the test cannot anchor a window', () => {
+    // A positive on the cycle's own first day: windowFor would be null.
+    expect(applyTestOverride(w, '2015-03-01', '2015-03-01')).toEqual({ ...w, fromTest: false });
+    expect(applyTestOverride(w, '2015-03-01', '2015-03-01').from).toBeDefined();
+  });
+
   it('reports no override when there is no test', () => {
     expect(applyTestOverride(w, null, '2015-03-01')).toEqual({ ...w, fromTest: false });
   });

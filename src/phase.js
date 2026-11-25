@@ -40,11 +40,19 @@ export function firstPositiveTest(doc, cycleStartISO, nextStartISO) {
   return first;
 }
 
+// Contract: always returns a usable {from, descent, to, fromTest}; never null,
+// never partial. Callers (the prediction hook) rely on this.
 export function applyTestOverride(window, testISO, cycleStartISO) {
   if (testISO == null || (testISO >= window.from && testISO <= window.to)) {
     return { ...window, fromTest: false };
   }
   // A test outside the window wins: it is an observation, the window a guess.
   const recentred = windowFor(testISO, cycleStartISO);
+  // A positive on the cycle's first day or two cannot anchor a window (descent
+  // would land on or before the cycle start). Keep the arithmetic window then:
+  // dropping it would erase fertile marks the arithmetic flags, and hiding a
+  // flagged day is the one direction this feature may not fail in. Such a test
+  // is more likely a mis-log or odd surge; it still shows in the day panel.
+  if (recentred === null) return { ...window, fromTest: false };
   return { ...recentred, fromTest: true };
 }
