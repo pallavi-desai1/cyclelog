@@ -271,6 +271,20 @@ describe('phaseAt', () => {
   it('names the days after the window', () => {
     expect(phaseAt(doc, '2015-03-20', windows)).toBe('luteal');
   });
+  it('covers an open span on its start day only, matching calendar and day', () => {
+    expect(phaseAt(doc, '2015-03-29', windows)).toBe('period');
+    expect(phaseAt(doc, '2015-03-30', windows)).not.toBe('period');
+    expect(phaseAt(doc, '2015-03-31', windows)).not.toBe('period');
+  });
+  it('matches the window of the cycle containing the date, not stored order', () => {
+    const two = [
+      ...windows,
+      { from: '2015-04-08', descent: '2015-04-12', to: '2015-04-13', cycleStart: '2015-03-29', fromTest: false },
+    ];
+    expect(phaseAt(doc, '2015-04-05', two)).toBe('follicular');
+    expect(phaseAt(doc, '2015-04-10', two)).toBe('fertile');
+    expect(phaseAt(doc, '2015-04-20', two)).toBe('luteal');
+  });
   it('is unknown with no cycle to count from', () => {
     expect(phaseAt({}, '2015-03-20', [])).toBe('unknown');
   });
