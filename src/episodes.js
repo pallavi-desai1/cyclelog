@@ -1,4 +1,4 @@
-import { episodeAt } from './cycles.js';
+import { episodeAt, isNoMethod } from './cycles.js';
 
 // Irregularity priors by what the method is expected to do to the cycle.
 export const SIGMA_BY_EFFECT = { suppress: 7, regulate: 3, none: 0 };
@@ -13,7 +13,7 @@ export function sigmaForEffect(effect) {
 }
 
 export function sortedEpisodes(doc) {
-  return [...(doc.birthControl ?? [])].sort((a, b) => a.startedOn.localeCompare(b.startedOn));
+  return (doc.birthControl ?? []).filter(episode => !isNoMethod(episode)).sort((a, b) => a.startedOn.localeCompare(b.startedOn));
 }
 
 export function firstEpisode(doc) {

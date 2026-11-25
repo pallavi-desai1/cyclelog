@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCycles, currentCycle, episodeAt } from '../src/cycles.js';
+import { buildCycles, currentCycle, episodeAt, isNoMethod } from '../src/cycles.js';
 import { blankDay } from '../src/importers/clue.js';
 
 const span = (start, end, extra = {}) => ({
@@ -294,5 +294,55 @@ describe('episodeAt when two methods share a start date', () => {
   it('answers the same whichever order they are stored in', () => {
     const reversed = { birthControl: [...sameDay.birthControl].reverse() };
     expect(episodeAt(reversed, '2015-02-01').method).toBe('copper IUD');
+  });
+});
+
+describe('isNoMethod', () => {
+  for (const name of ['nothing', 'Nothing', '  NOTHING  ', 'none', 'no method', 'off birth control']) {
+    it(`treats ${JSON.stringify(name)} as no method`, () => {
+      expect(isNoMethod({ method: name })).toBe(true);
+    });
+  }
+  for (const name of ['implant', 'pill', 'copper IUD']) {
+    it(`treats ${JSON.stringify(name)} as a method`, () => {
+      expect(isNoMethod({ method: name })).toBe(false);
+    });
+  }
+  it('treats an empty-string name as no method', () => {
+    expect(isNoMethod({ method: '' })).toBe(true);
+  });
+  it('does not treat a non-string name as no method', () => {
+    expect(isNoMethod({ method: null })).toBe(false);
+    expect(isNoMethod({ method: 5 })).toBe(false);
+  });
+});
+
+describe('episodeAt with a no-method row', () => {
+  const nd = { birthControl: [
+    { method: 'implant', startedOn: '2015-01-01', endedOn: '2015-06-30', expectedEffect: 'suppress' },
+    { method: 'nothing', startedOn: '2015-06-30', endedOn: null, expectedEffect: 'none' },
+  ] };
+
+  it('reports no episode on a day covered only by the no-method row', () => {
+    expect(episodeAt(nd, '2015-08-01')).toBeNull();
+  });
+
+  it('still reports the real method on its own days', () => {
+    expect(episodeAt(nd, '2015-03-01').method).toBe('implant');
+  });
+
+  it('reports the real method on a shared boundary day rather than skipping to nothing', () => {
+    expect(episodeAt(nd, '2015-06-30').method).toBe('implant');
+  });
+
+  it('does not treat a scope-stripped episode as no method', () => {
+    // src/sync/scope.js EPISODE_FIELDS.dates omits `method`, so his copy has
+    // method: undefined on every episode. Reading that as "no method" would
+    // make episodeAt return null for all of them and switch off fertile-window
+    // suppression on his screen alone, where no other test looks.
+    expect(isNoMethod({ startedOn: '2015-01-01', endedOn: null, expectedEffect: 'suppress' })).toBe(false);
+    const stripped = { birthControl: [{ startedOn: '2015-01-01', endedOn: null, expectedEffect: 'suppress' }] };
+    expect(episodeAt(stripped, '2015-03-01')).not.toBeNull();
+    expect(episodeAt(stripped, '2015-03-01').expectedEffect).toBe('suppress');
   });
 });

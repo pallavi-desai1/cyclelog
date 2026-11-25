@@ -205,3 +205,11 @@ describe('meanShift', () => {
     expect(Number.isNaN(meanShift([]))).toBe(false);
   });
 });
+
+it('counts no period start as being during an episode when the row is no-method', () => {
+  const d = {
+    spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }],
+    birthControl: [{ method: 'nothing', startedOn: '2015-01-15', endedOn: null, expectedEffect: 'none' }],
+  };
+  expect(periodStartsDuringEpisodes(d)).toEqual([]);
+});

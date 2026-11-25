@@ -25,9 +25,27 @@ function governs(episode, incumbent) {
   return true;
 }
 
+const NO_METHOD_NAMES = new Set(['nothing', 'none', 'no method', 'off birth control', '']);
+
+// A row recorded as "nothing" is a stretch of time on no method, not a method.
+// This requires an EXPLICIT word. A `method` that is undefined, absent or not a
+// string must return false: under the `dates` share scope src/sync/scope.js
+// strips the method name on purpose, so every episode on the partner's phone
+// has method: undefined. Reading that as "no method" would make episodeAt
+// return null for all of them and switch off fertile-window suppression on his
+// screen alone. The empty string IS in the set: the editor rejects an empty
+// name (src/episodes-edit.js), so '' can only come from an import, whereas
+// undefined comes from a legitimate scope projection. Do not "simplify" this
+// to `!episode.method`.
+export function isNoMethod(episode) {
+  if (typeof episode?.method !== 'string') return false;
+  return NO_METHOD_NAMES.has(episode.method.trim().toLowerCase());
+}
+
 export function episodeAt(doc, iso) {
   let latest = null;
   for (const episode of doc.birthControl ?? []) {
+    if (isNoMethod(episode)) continue;
     const started = episode.startedOn <= iso;
     const ended = !isOpen(episode) && episode.endedOn < iso;
     if (!started || ended) continue;

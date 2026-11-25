@@ -177,3 +177,11 @@ describe('episodeCycles', () => {
     expect(episodeCycles(cycles, d, '2016-10-01').map(c => c.start)).toEqual(['2016-07-01', '2016-08-15']);
   });
 });
+
+it('firstEpisode skips a no-method row recorded before any real method', () => {
+  const d = { birthControl: [
+    { method: 'nothing', startedOn: '2015-01-01', endedOn: '2015-05-01', expectedEffect: 'none' },
+    { method: 'implant', startedOn: '2015-05-01', endedOn: null, expectedEffect: 'suppress' },
+  ] };
+  expect(firstEpisode(d).method).toBe('implant');
+});
