@@ -658,13 +658,19 @@ describe('bleeding on a suppressing method', () => {
 
 describe('naturalModel', () => {
   it('reports unavailable with fewer than two natural cycles', () => {
-    const m = naturalModel([{ start: '2015-01-01', nextStart: '2015-01-29', length: 28 }], {}, '2015-02-01');
+    // Spans are present so an anchor exists: the sample size is the only reason
+    // this can be unavailable.
+    const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }] };
+    const m = naturalModel(buildCycles(d), d, '2015-02-01');
     expect(m.available).toBe(false);
     expect(m.model).toBe('natural');
     expect(m.reason).toMatch(/natural/);
   });
 
-  it('anchors on the most recent logged period start, not a frozen boundary', () => {
+  // Pins values only; baseline and natural coincide on this fixture. The test
+  // that distinguishes the anchors is 'anchors on the last period even when it
+  // fell inside an episode'.
+  it('reports the anchor and date for a document with no methods', () => {
     const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }] };
     const cycles = buildCycles(d);
     const m = naturalModel(cycles, d, '2015-03-01');
@@ -726,7 +732,9 @@ describe('adaptedModel takes naturalModel as its prior', () => {
     expect(baselineModel(cycles, d, '2015-10-15').length).toBe(28);
   });
 
-  it('uses the natural length off any method', () => {
+  // Baseline and natural coincide here, so this cannot tell the priors apart; the
+  // pin is 'learns from natural cycles logged after a method ended'.
+  it('off any method, adapted and natural agree', () => {
     const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }] };
     const cycles = buildCycles(d);
     expect(adaptedModel(cycles, d, '2015-03-01').date)
