@@ -21,6 +21,7 @@ const PRECACHE = [
   'src/episodes.js',
   'src/episodes-edit.js',
   'src/merge.js',
+  'src/phase.js',
   'src/predict.js',
   'src/spans.js',
   'src/weighted.js',
