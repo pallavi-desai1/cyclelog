@@ -810,4 +810,21 @@ describe('a test outside the window moves the prediction', () => {
     expect(m.fromTest).toBe(true);
     expect(m.confidence).toBeNull();
   });
+
+  it('moves the date for a test before a suppressing method, but reads it as not expected', () => {
+    // Test 03-05 is outside the window 03-08..03-13 (due 03-26, descent 03-12),
+    // and no method was in force that day, so the date moves to 03-05 + 14 =
+    // 03-19. The suppressing episode begins 03-15; today 03-25 is 6 days past
+    // the moved date (> 3 grace), so a suppressing method means not-expected.
+    const doc = {
+      ...base,
+      birthControl: [{ method: 'implant', startedOn: '2015-03-15', endedOn: null, expectedEffect: 'suppress' }],
+      days: { '2015-03-05': { tests: { ovulation: 'positive' } } },
+    };
+    const m = adaptedModel(buildCycles(doc), doc, '2015-03-25');
+    expect(m.date).toBe('2015-03-19');
+    expect(m.fromTest).toBe(true);
+    expect(m.daysLate).toBe(6);
+    expect(m.status).toBe('not-expected');
+  });
 });

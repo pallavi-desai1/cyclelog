@@ -221,14 +221,16 @@ export function naturalModel(cycles, doc, todayISO) {
 // A moved date can land before today (an old test): it is returned as is, with
 // status late, because it is the observation-derived date, not a projection.
 //
-// Status is judged with suppressing=false on purpose, not by omission: the gate
-// in movedNextStart only lets a move through when no method suppresses (effect
-// 'none'), and 'suppressing' requires effect 'suppress', so it could never be
-// true here.
-function withTestMove(model, doc, todayISO) {
+// `suppressing` follows TODAY's method, not the method at the test. The gate in
+// movedNextStart is evaluated at the descent day; this flag at today, so the two
+// can disagree: a test logged before a suppressing method began still moves the
+// date (a period was genuinely due about then, and a method begun mid-luteal
+// does not usually prevent that bleed), but once that method is in force a long
+// overdue period reads 'not-expected', not 'late'.
+function withTestMove(model, doc, todayISO, suppressing) {
   const moved = movedNextStart(doc, model.anchor, firstProjection(model.anchor, model.length));
   if (moved === null) return { ...model, fromTest: false };
-  const { status, daysLate } = predictionStatus(moved, todayISO, false);
+  const { status, daysLate } = predictionStatus(moved, todayISO, suppressing);
   return { ...model, date: moved, confidence: null, status, daysLate, fromTest: true };
 }
 
@@ -261,7 +263,7 @@ export function adaptedModel(cycles, doc, todayISO) {
       previousDate: nePrevious,
       status: neStatus.status,
       daysLate: neStatus.daysLate,
-    }, doc, todayISO);
+    }, doc, todayISO, false);
   }
 
   const sample = episodeCycles(cycles, doc, todayISO);
@@ -352,7 +354,7 @@ export function adaptedModel(cycles, doc, todayISO) {
     status,
     daysLate,
     reason: null,
-  }, doc, todayISO);
+  }, doc, todayISO, suppressing);
 }
 
 export function predict(cycles, doc, todayISO) {
