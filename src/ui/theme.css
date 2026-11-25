@@ -200,8 +200,8 @@ input { font-family: var(--font-body); }
 
 /* The month grid (§10.2: beneath the summary card). Flow is a filled dot
    scaled by intensity, spotting a ring, PMS an underline, and a predicted day
-   an outline — solid for the adapted prediction, dashed for the
-   counterfactual, so the two never rely on colour to be told apart. */
+   an outline — solid for the predicted day, dashed for a period predicted
+   for later, so the two never rely on colour to be told apart. */
 .calendar { margin-top: var(--gap); }
 
 .cal-head {
@@ -315,13 +315,34 @@ input { font-family: var(--font-body); }
 
 .cal-predicted { border: 2px solid var(--interactive); }
 
-/* The day the temperature is predicted to fall: a bar across the top edge, so
-   it composes with a flow fill, a spotting ring, a PMS underline and the
-   predicted outline instead of replacing any of them. */
-.cal-descent { border-top: 5px solid var(--descent); }
+/* The day the temperature is predicted to fall: a bar inside the top edge.
+   A pseudo-element, not border-top: .cal-predicted draws its ring as a
+   border, and a border-top here would replace that ring's top edge. Drawn
+   this way it composes with a flow fill, a spotting ring, a PMS underline and
+   the predicted ring instead of replacing any of them.
+   The bar's colour depends on what is behind it, so it is never gold on a
+   pale cell (gold is L* 86, the same as the lightest pink and 1.4:1 on white):
+   indigo with a white keyline by default, and on a day that bled, where the
+   corner wedge is also indigo. Gold only on the plain fertile fill. */
+.cal-descent::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  right: 6px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--fertile);
+  box-shadow: 0 0 0 1px var(--fertile-ink);
+}
 
-/* An outline rather than a border, so a day that is both predicted and the
-   counterfactual shows both marks at once. */
+.cal-descent.cal-fertile:not(.cal-period)::before {
+  background: var(--descent);
+  box-shadow: none;
+}
+
+/* An outline rather than a border, so a day that is both predicted and
+   upcoming shows both marks at once. */
 .cal-upcoming { outline: 2px dashed var(--baseline); outline-offset: 2px; }
 
 .cal-cell:focus-visible { outline: 3px solid var(--interactive); outline-offset: 1px; }
@@ -341,8 +362,8 @@ input { font-family: var(--font-body); }
    named in the cell's aria-label and in the legend, and every one of these
    states additionally carries a shape — a dot, a ring, an underline, an
    outline — so none of it depends on hue alone. */
-/* Her words: white for where the period would have been. A hollow cell
-   against the filled real ones, ringed in dashed lavender.
+/* A period predicted for later: a hollow cell against the filled real ones,
+   ringed in dashed lavender.
    Scoped with :not(.cal-period) so it never repaints a day that actually
    bled: on such a day the fill stays, the dashed ring is added, and both
    facts show. Unscoped, it also put the dark ink of .cal-period onto a
@@ -384,7 +405,7 @@ input { font-family: var(--font-body); }
 
 
 @media (prefers-color-scheme: dark) {
-  /* The ghost stays hollow rather than literally white, which would glare. */
+  /* An upcoming day stays hollow rather than literally white, which would glare. */
   .cal-upcoming:not(.cal-period) { background: var(--surface); }
 }
 

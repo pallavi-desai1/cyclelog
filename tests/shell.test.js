@@ -320,7 +320,7 @@ describe('calendar styling', () => {
     }
   });
 
-  it('draws the counterfactual dashed against a solid prediction outline', () => {
+  it('draws an upcoming period dashed against a solid prediction outline', () => {
     expect(ruleBody('.cal-predicted')).toMatch(/solid/);
     expect(ruleBody('.cal-upcoming')).toMatch(/dashed/);
   });
@@ -516,13 +516,13 @@ describe('legend swatches', () => {
   });
 });
 
-describe('a day that both bled and was a ghost', () => {
-  // The counterfactual fill must never repaint a day that actually bled: the
+describe('a day that both bled and is marked upcoming', () => {
+  // The upcoming fill must never repaint a day that actually bled: the
   // fill is the observation, the dashed ring is the comparison, and both
-  // belong on the cell. Unscoped, the ghost's background also put the dark
+  // belong on the cell. Unscoped, the upcoming background also put the dark
   // .cal-period ink onto a near-black cell in dark mode, and the date
   // number disappeared.
-  it('scopes the ghost fill away from bleeding days', () => {
+  it('scopes the upcoming fill away from bleeding days', () => {
     const text = cssRules();
     expect(text).toMatch(/\.cal-upcoming:not\(\.cal-period\)\s*\{[^}]*background/);
     expect(text).not.toMatch(/(^|[\s,}])\.cal-upcoming\s*\{[^}]*background/);
@@ -576,6 +576,12 @@ describe('the content security policy with sharing', () => {
   });
 });
 
+// The declaration block of the rule whose selector is exactly this string.
+function ruleOf(selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[}\\s,])${escaped}\\s*\\{([^}]*)\\}`).exec(cssRules())?.[1] ?? '';
+}
+
 describe('the fertile window and the descent day', () => {
   // The owner is using a predicted fertile window to avoid pregnancy. An
   // unmarked day means "not predicted fertile", never "safe", so nothing here
@@ -604,7 +610,46 @@ describe('the fertile window and the descent day', () => {
 
   it('draws the fertile window as a fill and the descent day as a mark that composes with it', () => {
     expect(ruleBody('.cal-fertile')).toMatch(/background/);
-    expect(ruleBody('.cal-descent')).toMatch(/border|box-shadow|outline/);
+    // A mark that is actually drawn: generated content, a real height, a
+    // colour from the palette. `border: 0` or `outline: none` would not do.
+    const bar = ruleOf('.cal-descent::before');
+    expect(bar).toMatch(/content:\s*''/);
+    expect(bar).toMatch(/position:\s*absolute/);
+    expect(Number(bar.match(/height:\s*(\d+)px/)?.[1] ?? 0)).toBeGreaterThanOrEqual(3);
+    expect(bar).toMatch(/background:\s*var\(--(fertile|descent)\)/);
+  });
+
+  it('never draws the descent bar as a border, which would replace the predicted ring', () => {
+    expect(ruleBody('.cal-predicted')).toMatch(/border:/);
+    expect(ruleOf('.cal-descent')).toBe('');
+  });
+
+  it('draws the descent bar gold only on a plain fertile fill, indigo everywhere else', () => {
+    // Gold is L* 86.4, the same as the lightest pink in greyscale, and 1.4:1 on
+    // white. The default must be the dark token; gold needs fertile and not bled.
+    expect(ruleOf('.cal-descent::before')).toMatch(/background:\s*var\(--fertile\)/);
+    expect(ruleOf('.cal-descent.cal-fertile:not(.cal-period)::before')).toMatch(/background:\s*var\(--descent\)/);
+    expect(cssRules().match(/var\(--descent\)/g).length).toBe(1);
+  });
+
+  it('keeps the window and the date number readable on every cascade collision', () => {
+    const text = cssRules();
+    const at = selector => text.lastIndexOf(selector);
+    const fertile = at('.cal-fertile:not(.cal-period) {');
+    expect(fertile).toBeGreaterThan(-1);
+    // Same specificity as these, so it has to come last to win.
+    for (const rival of ['.cal-upcoming:not(.cal-period) {', '.cal-today {', '.cal-selected {']) {
+      expect(text.indexOf(rival), rival).toBeGreaterThan(-1);
+      expect(fertile, rival).toBeGreaterThan(text.lastIndexOf(rival));
+    }
+  });
+
+  it('shows a fertile day that bled as a wedge over the flow fill, not a replacement', () => {
+    const wedge = ruleOf('.cal-fertile.cal-period');
+    expect(wedge).toMatch(/background-image:\s*linear-gradient\([^)]*var\(--fertile\)/);
+    // The shorthand would reset the flow colour underneath.
+    expect(wedge).not.toMatch(/background:/);
+    expect(ruleOf('.cal-fertile:not(.cal-period)')).toMatch(/background:/);
   });
 
   it('keeps the dashed outline for forward projections under its new name', () => {
