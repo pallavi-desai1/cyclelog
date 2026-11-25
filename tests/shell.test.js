@@ -469,6 +469,9 @@ describe('legend swatches', () => {
     expect(base, '.cal-swatch base rule').toBeGreaterThan(-1);
     for (const selector of [
       '.cal-spotting {', '.cal-predicted {', '.cal-upcoming {',
+      // The legend wears the cells' own classes, so the fertile fill and the
+      // descent bar must also come after the swatch base to win over it.
+      '.cal-fertile {', '.cal-descent::before {',
     ]) {
       expect(text.indexOf(selector), selector).toBeGreaterThan(base);
     }
