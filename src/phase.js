@@ -145,7 +145,11 @@ export function cycleWindows(doc, { nextStartFor, fromISO, toISO }) {
 // descent = nextStart - 14 would advance with it, so a late period would drag
 // the fertile window forward a day per day and un-mark days it marked
 // yesterday. Pinned, the window holds still and falls into the past.
-// A positive test outside the window then moves it (movedNextStart).
+// It returns the ARITHMETIC date only. A positive test outside the window is
+// applied once, by cycleWindows (applyTestOverride), which then reports
+// fromTest truthfully; applying movedNextStart here as well would hand
+// cycleWindows an already-moved date, find the test inside the window, and
+// lose the provenance.
 //
 // The rounding below mirrors predict.js's firstProjection, which this module
 // may not import (predict.js imports this one); a test pins their equality.
@@ -156,8 +160,7 @@ export function nextStartForDoc(doc, { anchor, length }) {
     if (following !== undefined) return following;
     if (!anchor || cycleStartISO !== anchor) return null;
     if (!Number.isFinite(length) || !(length > 0)) return null;
-    const pinned = addDays(anchor, Math.round(length));
-    return movedNextStart(doc, cycleStartISO, pinned) ?? pinned;
+    return addDays(anchor, Math.round(length));
   };
 }
 

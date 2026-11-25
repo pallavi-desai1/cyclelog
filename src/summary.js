@@ -40,10 +40,7 @@ function phaseBlock(doc, adapted, current, todayISO) {
     name,
     cycleDay: current ? current.dayOfCycle : null,
     window: w === null ? null : { from: w.from, descent: w.descent, to: w.to },
-    // nextStartFor already moved the date, so the window arrives centred on the
-    // test day and cycleWindows sees the test inside it (w.fromTest false).
-    // The model's own flag is what remembers the move.
-    fromTest: w !== null && (w.fromTest || adapted.fromTest === true),
+    fromTest: w === null ? false : w.fromTest,
     caveat: { fixed: FIXED_CAVEAT, uncertainty: uncertaintyCaveat(adapted) },
   };
 }

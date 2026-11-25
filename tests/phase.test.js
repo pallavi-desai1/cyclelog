@@ -382,11 +382,11 @@ describe('nextStartForDoc', () => {
     expect(f('2015-02-26')).toBeNull();
   });
 
-  it('moves the current next start when a positive test lies outside the window', () => {
-    // Predicted 03-26, window 03-08..03-13. Positive on 03-16 -> descent 03-16,
-    // next start 03-16 + 14 = 03-30.
+  it('returns the arithmetic date even when a positive test exists; cycleWindows applies the override', () => {
+    // Positive on 03-16 is outside 03-08..03-13, but the override is applied once,
+    // in cycleWindows, so the pinned date stays 02-26 + 28 = 03-26.
     const withTest = { ...d, days: { '2015-03-16': { tests: { ovulation: 'positive' } } } };
     const f = nextStartForDoc(withTest, { anchor: '2015-02-26', length: 28 });
-    expect(f('2015-02-26')).toBe('2015-03-30');
+    expect(f('2015-02-26')).toBe('2015-03-26');
   });
 });

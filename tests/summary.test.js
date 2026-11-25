@@ -302,6 +302,23 @@ describe('summary.phase', () => {
     expect(buildSummary(pdoc(), '2015-03-16').phase.fromTest).toBe(false);
   });
 
+  it('still moves the predicted date to the test day plus fourteen', () => {
+    const d = pdoc();
+    d.days = { '2015-03-16': { tests: { ovulation: 'positive' } } };
+    // 03-16 + 14 = 03-30 (arithmetic was 03-26).
+    expect(buildSummary(d, '2015-03-16').adapted.date).toBe('2015-03-30');
+    expect(buildSummary(pdoc(), '2015-03-16').adapted.date).toBe('2015-03-26');
+  });
+
+  it('leaves the window unmoved and fromTest false when the test is inside it', () => {
+    const d = pdoc();
+    d.days = { '2015-03-10': { tests: { ovulation: 'positive' } } };
+    const s = buildSummary(d, '2015-03-10');
+    expect(s.phase.window).toEqual({ from: '2015-03-08', descent: '2015-03-12', to: '2015-03-13' });
+    expect(s.phase.fromTest).toBe(false);
+    expect(s.adapted.date).toBe('2015-03-26');
+  });
+
   it('always carries the fixed caveat, verbatim', () => {
     expect(buildSummary(pdoc(), '2015-03-01').phase.caveat.fixed).toBe(FIXED);
     expect(buildSummary({}, '2015-03-01').phase.caveat.fixed).toBe(FIXED);
