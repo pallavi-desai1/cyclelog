@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { days, buildSummary } from '../src/summary.js';
+import { days, buildSummary, uncertaintyCaveat } from '../src/summary.js';
 
 // De-identified fixture: 28-day cycles in 2015, outside the range of any real
 // data in this repository. The expected figures below were obtained two ways:
@@ -259,6 +259,37 @@ describe('the baseline anchor', () => {
   });
 });
 
+const SAMPLE = 'This prediction is based on only a few cycles, '
+  + 'so these days could be off by several days or more.';
+
+describe('uncertaintyCaveat boundaries', () => {
+  const m = (sigma, nEff) => ({ available: true, sigma, nEff });
+
+  it('does not fire the spread caveat at sigma exactly 2', () => {
+    // 2 > 2 is false; nEff 10 is not thin, so nothing fires.
+    expect(uncertaintyCaveat(m(2, 10))).toBeNull();
+  });
+
+  it('fires the spread caveat just above 2, rounded', () => {
+    expect(uncertaintyCaveat(m(2.1, 10))).toBe(
+      'Your recent cycles vary by about \u00b1 2 days, so these days could be off by that much or more.',
+    );
+  });
+
+  it('does not fire the sample caveat at nEff exactly 6', () => {
+    // 6 < 6 is false; sigma 0 is not spread.
+    expect(uncertaintyCaveat(m(0, 6))).toBeNull();
+  });
+
+  it('fires the sample caveat just below 6', () => {
+    expect(uncertaintyCaveat(m(0, 5.99))).toBe(SAMPLE);
+  });
+
+  it('gives the sample string, never a number, when the model is unavailable', () => {
+    expect(uncertaintyCaveat({ available: false, sigma: null, nEff: 0 })).toBe(SAMPLE);
+  });
+});
+
 describe('summary.phase', () => {
   const pdoc = () => ({
     spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }],
@@ -372,6 +403,7 @@ describe('summary.phase', () => {
     expect(s.phase.name).toBe('unknown');
     expect(s.phase.cycleDay).toBeNull();
     expect(s.phase.window).toBeNull();
-    expect(s.phase.caveat.uncertainty).not.toBeNull();
+    // Unavailable model: sigma is null, and no number may be claimed.
+    expect(s.phase.caveat.uncertainty).toBe(SAMPLE);
   });
 });

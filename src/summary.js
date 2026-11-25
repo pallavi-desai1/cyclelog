@@ -16,7 +16,8 @@ const FIXED_CAVEAT = 'Fertile days are predicted from your own past cycle length
 // identical cycle lengths give sigma exactly 0, and "\u00b1 0 days" on a sample
 // of two would be a false claim of precision on the surface that exists to
 // stay honest. Spread wins when both fire (it is the more specific claim).
-function uncertaintyCaveat(adapted) {
+// Exported so the two thresholds can be tested at their exact boundaries.
+export function uncertaintyCaveat(adapted) {
   if (adapted.available && adapted.sigma > 2) {
     return `Your recent cycles vary by about \u00b1 ${Math.round(adapted.sigma)} days, `
       + 'so these days could be off by that much or more.';
