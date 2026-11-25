@@ -115,6 +115,14 @@ describe('the summary card', () => {
       expect(html).not.toContain('class="phase"');
     });
 
+    it('prints no Day undefined or Day NaN when the cycle day is not a number', () => {
+      for (const cycleDay of [undefined, NaN, null]) {
+        const html = withPhase({ name: 'luteal', cycleDay, window: null, fromTest: false, caveat });
+        expect(html).toMatch(/Luteal/);
+        expect(html).not.toMatch(/Day (undefined|NaN|null)/);
+      }
+    });
+
     it('prints the caveat beside a fertile phase, and not beside a luteal one', () => {
       const fertile = withPhase({ name: 'fertile', cycleDay: 12, window: null, fromTest: false, caveat });
       expect(fertile).toContain('FIXED COPY');
@@ -280,7 +288,7 @@ describe('the calendar', () => {
     expect(labels).toMatch(/heavy flow/);
     expect(labels).toMatch(/spotting/);
     expect(labels).toMatch(/PMS/);
-    expect(labels).toMatch(/period expected/);
+    expect(labels).toMatch(/period expected(?! later)/);
     expect(labels).toMatch(/period expected later/);
     expect(labels).not.toMatch(/birth control/);
     expect(labels).toMatch(/today/);
@@ -355,7 +363,7 @@ describe('the day panel', () => {
   });
 
   it('says a period is expected on that day', () => {
-    expect(renderDay(detail({ predicted: true }))).toMatch(/period expected/i);
+    expect(renderDay(detail({ predicted: true }))).toMatch(/period expected(?! later)/i);
   });
 
   it('says a period is expected later, never as lateness', () => {
@@ -482,7 +490,8 @@ describe('calendar colour coding', () => {
       'Period expected', 'Period expected later',
       'Fertile window (predicted)', 'Egg expected to descend',
     ]) {
-      expect(html).toContain(label);
+      // Whole legend entry, so 'Period expected' is not satisfied by 'Period expected later'.
+      expect(html).toContain(`</span>${label}</li>`);
     }
   });
 

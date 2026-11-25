@@ -163,7 +163,7 @@ describe('theme', () => {
       '--bg': '#FFF5F8', '--surface': '#FFFFFF', '--border': '#FBCEDC',
       '--text': '#3A2630', '--heading': '#A62E5C', '--interactive': '#D4517E',
       '--flow-light': '#FBCEDC', '--flow-medium': '#F08CAE', '--flow-heavy': '#C83D6B',
-      '--baseline': '#B9A4D4', '--positive': '#3F8F86', '--spotting': '#A9705B',
+      '--upcoming': '#B9A4D4', '--positive': '#3F8F86', '--spotting': '#A9705B',
       '--warning': '#B06A1F',
     };
     for (const [token, value] of Object.entries(tokens)) {
@@ -206,7 +206,7 @@ describe('summary card styling', () => {
 
   it('styles every class the renderer emits', () => {
     for (const className of [
-      'card', 'headline', 'since', 'label', 'value', 'counterfactual',
+      'card', 'headline', 'since', 'label', 'value',
       'late', 'no-period', 'on-time', 'unavailable',
     ]) {
       expect(hasRuleFor(className), `.${className}`).toBe(true);
@@ -220,12 +220,6 @@ describe('summary card styling', () => {
     expect(body).toMatch(/background:\s*var\(--surface\)/);
     expect(body).toMatch(/border(-\w+)?:.*var\(--border\)/);
     expect(body).toMatch(/border-radius:\s*var\(--radius\)/);
-  });
-
-  it('gives the counterfactual a dashed treatment, distinct from a solid prediction line', () => {
-    const match = css().match(/\.counterfactual\s*\{([^}]*)\}/);
-    expect(match, '.counterfactual rule').not.toBeNull();
-    expect(match[1]).toMatch(/dashed/);
   });
 
   it('mutes the label against the value', () => {

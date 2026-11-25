@@ -44,7 +44,7 @@ export function renderSummary(summary) {
 
   const phaseName = phaseLabel(phase);
   if (phaseName !== null) {
-    const day = phase.cycleDay === null ? '' : `, Day ${escapeHtml(phase.cycleDay)}`;
+    const day = Number.isFinite(phase.cycleDay) ? `, Day ${escapeHtml(phase.cycleDay)}` : '';
     parts.push(line('Phase', `${escapeHtml(phaseName)}${day}`, 'phase'));
     // The caveats are built in buildSummary and printed as given. The
     // fertile phase is the one this screen names as a fertile claim.

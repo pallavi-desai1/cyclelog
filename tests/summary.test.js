@@ -407,3 +407,25 @@ describe('summary.phase', () => {
     expect(s.phase.caveat.uncertainty).toBe(SAMPLE);
   });
 });
+
+describe('the caveat copy she will actually read', () => {
+  const real = [
+    buildSummary(doc(SUPPRESS), '2015-07-15').phase.caveat.fixed,
+    uncertaintyCaveat({ available: true, sigma: 5, nEff: 10 }),
+    uncertaintyCaveat({ available: true, sigma: 0, nEff: 2 }),
+  ];
+
+  it('has all three strings to check', () => {
+    for (const text of real) expect(text).toMatch(/\S/);
+    expect(new Set(real).size).toBe(3);
+  });
+
+  // The fixed copy says "is not a safe day" to deny it, so the phrase is
+  // allowed only in that negated form.
+  it('never says an unmarked day is safe, or that a day is not fertile or infertile', () => {
+    for (const text of real) {
+      expect(text.replace(/not a safe day/gi, '')).not.toMatch(/safe day/i);
+      expect(text).not.toMatch(/not fertile|infertile/i);
+    }
+  });
+});

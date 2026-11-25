@@ -18,7 +18,7 @@
   --flow-heavy-fill: #DA5C86;
   --ink-on-flow: #2A0C33;
 
-  --baseline: #B9A4D4;
+  --upcoming: #B9A4D4;
 
   /* The fertile window. Deep indigo, not pink, green or red: nothing here may
      read as a traffic light, because an unmarked day means "not predicted
@@ -55,7 +55,7 @@
     --heading: #F7AFC8;
     --interactive: #E8799C;
     --danger: #F2B8B5;
-    --baseline: #C9B6E4;
+    --upcoming: #C9B6E4;
     /* L* 32.2: 54.7 / 37.5 / 15.7 / 24.2 from the pinks; lifted a notch so
        the fill stays visible on the near-black surface. */
     --fertile: #563F83;
@@ -154,18 +154,11 @@ button[hidden] { display: none; }
   font-family: var(--font-body);
 }
 
-/* Spec §10.3: the adapted prediction reads as a solid line, the
-   counterfactual as a dashed one — and labelled in words too (see
-   render.js), so the distinction survives colour blindness. */
+/* Spec §10.3: the adapted prediction reads as a solid line — and labelled
+   in words too (see render.js), so it survives colour blindness. */
 .predictions p {
   border-left: 3px solid var(--interactive);
   padding-left: 0.6em;
-}
-
-.counterfactual {
-  border-left: 3px dashed var(--baseline);
-  padding-left: 0.6em;
-  color: var(--baseline);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -343,7 +336,7 @@ input { font-family: var(--font-body); }
 
 /* An outline rather than a border, so a day that is both predicted and
    upcoming shows both marks at once. */
-.cal-upcoming { outline: 2px dashed var(--baseline); outline-offset: 2px; }
+.cal-upcoming { outline: 2px dashed var(--upcoming); outline-offset: 2px; }
 
 .cal-cell:focus-visible { outline: 3px solid var(--interactive); outline-offset: 1px; }
 

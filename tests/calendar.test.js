@@ -196,7 +196,7 @@ describe('predictions on the grid', () => {
 
   // Coincidence is possible for any date but the next period itself, which is
   // clipped to the solid mark (see the clip test below).
-  it('marks both on one day when a later projection coincides with a prediction', () => {
+  it('gives the next period the solid mark alone when a projection lands on it', () => {
     const grid = monthGrid(doc(), {
       ...options, adaptedDate: '2015-04-23', upcomingDates: ['2015-04-23'],
     });
