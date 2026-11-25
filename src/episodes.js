@@ -59,7 +59,16 @@ export function baselineCycles(cycles, doc) {
 // in would look natural while its length was produced entirely by the method.
 // This is the same bug found and fixed in `baselineCycles` (see its comment), so
 // the test is interval intersection: [startedOn, endedOn ?? infinity] against
-// [cycle.start, cycle.nextStart], both ends inclusive.
+// [cycle.start, cycle.nextStart - 1].
+//
+// The upper bound is exclusive of nextStart because nextStart is the first day
+// of the NEXT cycle: a method starting the day a period begins cannot have
+// influenced the cycle that period ended. The lower bound stays closed, so an
+// episode whose inclusive endedOn falls on cycle.start still drops the cycle
+// (hormones linger; excluding is the conservative direction). For a single
+// open-ended episode this reduces to cycle.nextStart <= first.startedOn, which
+// is exactly baselineCycles' second condition, so the two samples agree on the
+// boundary.
 //
 // Hormonal means not "no method" and an effect other than 'none'. An unknown or
 // missing effect counts as hormonal, the same fail-safe as `sigmaForEffect`.
@@ -68,7 +77,7 @@ export function naturalCycles(cycles, doc) {
     episode => !isNoMethod(episode) && episode.expectedEffect !== 'none',
   );
   return usableCycles(cycles).filter(cycle => !hormonal.some(
-    episode => episode.startedOn <= cycle.nextStart
+    episode => episode.startedOn < cycle.nextStart
       && (episode.endedOn == null || episode.endedOn >= cycle.start),
   ));
 }

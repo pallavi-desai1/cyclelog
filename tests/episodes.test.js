@@ -232,13 +232,21 @@ describe('naturalCycles', () => {
     expect(naturalCycles(cyc, one({ expectedEffect: undefined }))).toEqual([]);
   });
 
-  it('counts an episode ending on the cycle start day as touching it', () => {
+  it('DROPS a cycle when an episode ends exactly on its start (hormones linger, conservative)', () => {
     const d = one({ startedOn: '2015-03-01', endedOn: '2015-04-20' });
     expect(naturalCycles(cyc, d).map(c => c.start)).not.toContain('2015-04-20');
   });
 
-  it('counts an episode starting on the cycle nextStart day as touching it', () => {
+  it('KEEPS a cycle when an episode starts exactly on its nextStart (that day belongs to the next cycle)', () => {
     const d = one({ startedOn: '2015-05-20', endedOn: '2015-05-21' });
-    expect(naturalCycles(cyc, d).map(c => c.start)).not.toContain('2015-04-20');
+    expect(naturalCycles(cyc, d).map(c => c.start)).toContain('2015-04-20');
+  });
+
+  it('agrees with baselineCycles about the boundary for a single hormonal episode', () => {
+    const d = one({ startedOn: '2015-06-18', endedOn: null });
+    const cs = [...cyc, { start: '2015-03-20', nextStart: '2015-04-20', length: 31 }].sort((a, b) => a.start.localeCompare(b.start));
+    const nat = naturalCycles(cs, d).map(c => c.start);
+    expect(nat).toEqual(baselineCycles(cs, d).map(c => c.start));
+    expect(nat).toContain('2015-05-20'); // nextStart === startedOn, kept by both
   });
 });
