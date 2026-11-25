@@ -4,6 +4,49 @@ import { predict } from './predict.js';
 import { currentEpisode } from './episodes.js';
 import { divergenceSeries, meanShift, meanShiftByEpisode } from './divergence.js';
 import { diffDays } from './dates.js';
+import { cycleWindows, phaseAt, nextStartForDoc } from './phase.js';
+
+const FIXED_CAVEAT = 'Fertile days are predicted from your own past cycle lengths. '
+  + 'This is not contraception \u2014 a day without a mark is not a safe day.';
+
+// Which caveat goes beside the fertile window is decided HERE, in the data, for
+// the same reason `confidence` is withheld for 'not-expected' below: so no
+// renderer can print the wrong thing by accident. Two strings, because they
+// make different claims. Spread-driven names a number; sample-driven must not:
+// identical cycle lengths give sigma exactly 0, and "\u00b1 0 days" on a sample
+// of two would be a false claim of precision on the surface that exists to
+// stay honest. Spread wins when both fire (it is the more specific claim).
+function uncertaintyCaveat(adapted) {
+  if (adapted.available && adapted.sigma > 2) {
+    return `Your recent cycles vary by about \u00b1 ${Math.round(adapted.sigma)} days, `
+      + 'so these days could be off by that much or more.';
+  }
+  if (!adapted.available || adapted.nEff < 6) {
+    return 'This prediction is based on only a few cycles, '
+      + 'so these days could be off by several days or more.';
+  }
+  return null;
+}
+
+function phaseBlock(doc, adapted, current, todayISO) {
+  const nextStartFor = nextStartForDoc(doc, {
+    anchor: adapted.available ? adapted.anchor : null,
+    length: adapted.available ? adapted.length : null,
+  });
+  const windows = cycleWindows(doc, { nextStartFor, fromISO: '0000-01-01', toISO: '9999-12-31' });
+  const name = phaseAt(doc, todayISO, windows);
+  const w = windows.find(x => x.cycleStart === current?.start) ?? null;
+  return {
+    name,
+    cycleDay: current ? current.dayOfCycle : null,
+    window: w === null ? null : { from: w.from, descent: w.descent, to: w.to },
+    // nextStartFor already moved the date, so the window arrives centred on the
+    // test day and cycleWindows sees the test inside it (w.fromTest false).
+    // The model's own flag is what remembers the move.
+    fromTest: w !== null && (w.fromTest || adapted.fromTest === true),
+    caveat: { fixed: FIXED_CAVEAT, uncertainty: uncertaintyCaveat(adapted) },
+  };
+}
 
 // "1 days late" reads as a bug in the app rather than a fact about her body.
 export function days(n) {
@@ -71,6 +114,8 @@ export function buildSummary(doc, todayISO) {
 
     headline: headlineFor(adapted),
 
+    phase: phaseBlock(doc, adapted, current, todayISO),
+
     adapted: {
       available: adapted.available,
       date: adapted.available ? adapted.date : null,
@@ -80,6 +125,9 @@ export function buildSummary(doc, todayISO) {
         ? adapted.confidence : null,
       length: adapted.available ? adapted.length : null,
       sigma: adapted.available ? adapted.sigma : null,
+      nEff: adapted.nEff,
+      anchor: adapted.available ? adapted.anchor : null,
+      fromTest: adapted.fromTest === true,
       weight: adapted.available ? adapted.weight : null,
       model: adapted.model,
       status: adapted.available ? adapted.status : null,

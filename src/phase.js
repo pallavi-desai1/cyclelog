@@ -136,6 +136,31 @@ export function cycleWindows(doc, { nextStartFor, fromISO, toISO }) {
   return out;
 }
 
+// The one place the "next start" of each cycle is decided, shared by the
+// summary and the calendar so the two cannot diverge. A cycle with a logged
+// following period uses that date. The CURRENT cycle (the anchor's) uses the
+// PINNED first projection, anchor + round(length): the date the period was
+// actually due. It must not be the first projection on or after today
+// (predict.js's projectForward): that advances with the clock, and
+// descent = nextStart - 14 would advance with it, so a late period would drag
+// the fertile window forward a day per day and un-mark days it marked
+// yesterday. Pinned, the window holds still and falls into the past.
+// A positive test outside the window then moves it (movedNextStart).
+//
+// The rounding below mirrors predict.js's firstProjection, which this module
+// may not import (predict.js imports this one); a test pins their equality.
+export function nextStartForDoc(doc, { anchor, length }) {
+  const starts = (doc?.spans ?? []).map(s => s.start).sort();
+  return function nextStartFor(cycleStartISO) {
+    const following = starts.find(s => s > cycleStartISO);
+    if (following !== undefined) return following;
+    if (!anchor || cycleStartISO !== anchor) return null;
+    if (!Number.isFinite(length) || !(length > 0)) return null;
+    const pinned = addDays(anchor, Math.round(length));
+    return movedNextStart(doc, cycleStartISO, pinned) ?? pinned;
+  };
+}
+
 // Names the phase of `iso`. `windows` is the output of cycleWindows.
 // A logged bleeding day outranks the arithmetic: it is an observation. In a
 // short cycle the window can open while she is still bleeding; the day is then

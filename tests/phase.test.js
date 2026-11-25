@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { diffDays } from '../src/dates.js';
+import { firstProjection } from '../src/predict.js';
 import {
   LUTEAL_DAYS, WINDOW_DAYS, DESCENT_POSITION,
-  descentFor, windowFor, firstPositiveTest, applyTestOverride, cycleWindows, phaseAt, movedNextStart,
+  descentFor, windowFor, firstPositiveTest, applyTestOverride, cycleWindows, phaseAt, movedNextStart, nextStartForDoc,
 } from '../src/phase.js';
 
 const diffInclusive = (a, b) => diffDays(a, b) + 1;
@@ -340,5 +341,52 @@ describe('movedNextStart on a hormonal method', () => {
 
   it('still moves the date on a method with effect none', () => {
     expect(movedNextStart(on('none'), '2015-03-01', '2015-03-29')).toBe('2015-04-05');
+  });
+});
+
+describe('nextStartForDoc', () => {
+  const d = {
+    spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }],
+  };
+
+  it('returns the logged following start for a cycle that has one', () => {
+    const f = nextStartForDoc(d, { anchor: '2015-02-26', length: 28 });
+    expect(f('2015-01-01')).toBe('2015-01-29');
+    expect(f('2015-01-29')).toBe('2015-02-26');
+  });
+
+  it('pins the current cycle to the first projection, with no clock to advance it', () => {
+    // 2015-02-26 + 28 = 2015-03-26. Nothing in the signature is a date today.
+    const f = nextStartForDoc(d, { anchor: '2015-02-26', length: 28 });
+    expect(f('2015-02-26')).toBe('2015-03-26');
+    expect(f('2015-02-26')).toBe(firstProjection('2015-02-26', 28));
+  });
+
+  it('rounds a fractional length the way firstProjection does', () => {
+    // round(28.5) = 29; 2015-02-26 + 29 = 2015-03-27.
+    const f = nextStartForDoc(d, { anchor: '2015-02-26', length: 28.5 });
+    expect(f('2015-02-26')).toBe('2015-03-27');
+    expect(f('2015-02-26')).toBe(firstProjection('2015-02-26', 28.5));
+  });
+
+  it('declines to name a next start when there is no prediction to pin', () => {
+    const f = nextStartForDoc(d, { anchor: null, length: null });
+    expect(f('2015-02-26')).toBeNull();
+    expect(f('2015-01-29')).toBe('2015-02-26');
+  });
+
+  it('names no pinned start for a cycle that is not the anchor\u2019s', () => {
+    // The anchor 2015-03-05 is not the last logged start (2015-02-26), so the
+    // projection does not belong to that cycle and nothing is claimed.
+    const f = nextStartForDoc(d, { anchor: '2015-03-05', length: 28 });
+    expect(f('2015-02-26')).toBeNull();
+  });
+
+  it('moves the current next start when a positive test lies outside the window', () => {
+    // Predicted 03-26, window 03-08..03-13. Positive on 03-16 -> descent 03-16,
+    // next start 03-16 + 14 = 03-30.
+    const withTest = { ...d, days: { '2015-03-16': { tests: { ovulation: 'positive' } } } };
+    const f = nextStartForDoc(withTest, { anchor: '2015-02-26', length: 28 });
+    expect(f('2015-02-26')).toBe('2015-03-30');
   });
 });
