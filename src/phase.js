@@ -1,6 +1,7 @@
 // Fertile-window arithmetic. Pure: no DOM, no clock; every date is an argument.
 // Must never import predict.js (predict.js imports this module).
 import { addDays } from './dates.js';
+import { lastPeriodStartOnOrBefore } from './episodes.js';
 
 // Luteal phase is the steadier half of the cycle, so ovulation is counted
 // back from the next period rather than forward from the last one.
@@ -115,4 +116,21 @@ export function cycleWindows(doc, { nextStartFor, fromISO, toISO }) {
     out.push({ ...w, cycleStart });
   }
   return out;
+}
+
+// Names the phase of `iso`. `windows` is the output of cycleWindows.
+// A logged bleeding day outranks the arithmetic: it is an observation. In a
+// short cycle the window can open while she is still bleeding; the day is then
+// named 'period' while cycleWindows still carries the fertile mark, so nothing
+// the arithmetic flags is hidden. An open span covers its start day only
+// (`end ?? start`, as everywhere else in the app).
+export function phaseAt(doc, iso, windows) {
+  if ((doc?.spans ?? []).some(s => s.start <= iso && iso <= (s.end ?? s.start))) return 'period';
+  const cycleStart = lastPeriodStartOnOrBefore(doc ?? {}, iso);
+  if (cycleStart === null) return 'unknown';
+  const w = windows.find(x => x.cycleStart === cycleStart);
+  if (!w) return 'unknown';
+  if (iso < w.from) return 'follicular';
+  if (iso > w.to) return 'luteal';
+  return 'fertile';
 }

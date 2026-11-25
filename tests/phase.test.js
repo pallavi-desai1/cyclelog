@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { diffDays } from '../src/dates.js';
 import {
   LUTEAL_DAYS, WINDOW_DAYS, DESCENT_POSITION,
-  descentFor, windowFor, firstPositiveTest, applyTestOverride, cycleWindows,
+  descentFor, windowFor, firstPositiveTest, applyTestOverride, cycleWindows, phaseAt,
 } from '../src/phase.js';
 
 const diffInclusive = (a, b) => diffDays(a, b) + 1;
@@ -247,8 +247,45 @@ describe('cycleWindows and a late period', () => {
   it('has no clock: src/phase.js neither calls new Date() nor takes todayISO', () => {
     const root = fileURLToPath(new URL('..', import.meta.url));
     const src = readFileSync(join(root, 'src/phase.js'), 'utf8');
+    expect(src).toMatch(/export function cycleWindows/);
     expect(src).not.toMatch(/new Date\(/);
     expect(src).not.toMatch(/todayISO/);
     expect(src).not.toMatch(/Date\.now/);
+  });
+});
+
+describe('phaseAt', () => {
+  const doc = { spans: [{ start: '2015-03-01', end: '2015-03-05' }, { start: '2015-03-29' }] };
+  const windows = [{ from: '2015-03-11', descent: '2015-03-15', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: false }];
+
+  it('names a logged bleeding day', () => {
+    expect(phaseAt(doc, '2015-03-03', windows)).toBe('period');
+  });
+  it('names the days before the window', () => {
+    expect(phaseAt(doc, '2015-03-08', windows)).toBe('follicular');
+  });
+  it('names the window', () => {
+    expect(phaseAt(doc, '2015-03-11', windows)).toBe('fertile');
+    expect(phaseAt(doc, '2015-03-16', windows)).toBe('fertile');
+  });
+  it('names the days after the window', () => {
+    expect(phaseAt(doc, '2015-03-20', windows)).toBe('luteal');
+  });
+  it('is unknown with no cycle to count from', () => {
+    expect(phaseAt({}, '2015-03-20', [])).toBe('unknown');
+  });
+  it('is unknown when the cycle has no window, as under a suppressing method', () => {
+    expect(phaseAt(doc, '2015-03-20', [])).toBe('unknown');
+  });
+  it('keeps the fertile mark on a bleeding day in a short cycle, and still names the day period', () => {
+    // A 21-day cycle: descent is day 8, so the window opens on day 4 — inside
+    // a five-day period. Ruling 8: the mark stays, because hiding a day the
+    // arithmetic flags is the one direction this feature may not fail in.
+    const short = { spans: [{ start: '2015-03-01', end: '2015-03-05' }, { start: '2015-03-22' }] };
+    const w = cycleWindows(short, {
+      nextStartFor: () => '2015-03-22', fromISO: '2015-03-01', toISO: '2015-03-31',
+    });
+    expect(w[0]).toMatchObject({ from: '2015-03-04', descent: '2015-03-08', to: '2015-03-09' });
+    expect(phaseAt(short, '2015-03-04', w)).toBe('period');
   });
 });
