@@ -58,6 +58,18 @@ export function applyTestOverride(window, testISO, cycleStartISO) {
   return { ...recentred, fromTest: true };
 }
 
+// Where the next period moves to when a positive test outside the predicted
+// window re-centres this cycle's window, else null. The arithmetic window is
+// built from the predicted next start; an override that fires puts descent on
+// the test day and the period one luteal phase later.
+export function movedNextStart(doc, cycleStartISO, predictedNextISO) {
+  const base = windowFor(descentFor(predictedNextISO), cycleStartISO);
+  if (base === null) return null;
+  const test = firstPositiveTest(doc, cycleStartISO, predictedNextISO);
+  const w = applyTestOverride(base, test, cycleStartISO);
+  return w.fromTest ? addDays(w.descent, LUTEAL_DAYS) : null;
+}
+
 // Which birth-control episode governs `iso`, and what effect it expects.
 //
 // This DELIBERATELY duplicates the resolution rule of `episodeAt` in

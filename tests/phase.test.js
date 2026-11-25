@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { diffDays } from '../src/dates.js';
 import {
   LUTEAL_DAYS, WINDOW_DAYS, DESCENT_POSITION,
-  descentFor, windowFor, firstPositiveTest, applyTestOverride, cycleWindows, phaseAt,
+  descentFor, windowFor, firstPositiveTest, applyTestOverride, cycleWindows, phaseAt, movedNextStart,
 } from '../src/phase.js';
 
 const diffInclusive = (a, b) => diffDays(a, b) + 1;
@@ -301,5 +301,28 @@ describe('phaseAt', () => {
     });
     expect(w[0]).toMatchObject({ from: '2015-03-04', descent: '2015-03-08', to: '2015-03-09' });
     expect(phaseAt(short, '2015-03-04', w)).toBe('period');
+  });
+});
+
+describe('movedNextStart', () => {
+  const doc = { days: { '2015-03-22': { tests: { ovulation: 'positive' } } } };
+
+  it('moves the next start to a luteal phase after a test outside the window', () => {
+    // Predicted next 2015-03-29 puts the window at 03-11..03-16; the test is
+    // outside it, so descent becomes 03-22 and the period 14 days later.
+    expect(movedNextStart(doc, '2015-03-01', '2015-03-29')).toBe('2015-04-05');
+  });
+
+  it('does not move when the test falls inside the window', () => {
+    const inside = { days: { '2015-03-13': { tests: { ovulation: 'positive' } } } };
+    expect(movedNextStart(inside, '2015-03-01', '2015-03-29')).toBeNull();
+  });
+
+  it('does not move without a positive test', () => {
+    expect(movedNextStart({}, '2015-03-01', '2015-03-29')).toBeNull();
+  });
+
+  it('does not move when the cycle is too short to have a window', () => {
+    expect(movedNextStart(doc, '2015-03-01', '2015-03-15')).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { cycleWeight, weightedMedian, weightedSd, effectiveN } from './weighted.
 import { confidencePercent } from './confidence.js';
 import { baselineCycles, naturalCycles, episodeCycles, currentEpisode, sigmaForEffect } from './episodes.js';
 import { describeLengths } from './stats.js';
+import { movedNextStart } from './phase.js';
 
 // How fast the adapted model trusts the current episode over the baseline.
 // w = n/(n+TAU): half credit at three episode cycles, 80% at twelve.
@@ -32,6 +33,7 @@ const unavailable = (model, reason) => ({
   status: null,
   daysLate: null,
   reason,
+  fromTest: false,
 });
 
 export function lastPeriodStart(doc) {
@@ -153,6 +155,7 @@ export function baselineModel(cycles, doc, todayISO) {
     status: counterfactual.status === 'late' ? 'passed' : counterfactual.status,
     daysLate: counterfactual.daysLate,
     reason: null,
+    fromTest: false,
   };
 }
 
@@ -204,7 +207,21 @@ export function naturalModel(cycles, doc, todayISO) {
     status,
     daysLate,
     reason: null,
+    fromTest: false,
   };
+}
+
+// A positive ovulation test outside the predicted window moves the period date
+// (see movedNextStart). The confidence percentage is withheld then: it describes
+// the statistical model, and once a logged observation has displaced that
+// model's date the number no longer describes what is on screen. Withheld here,
+// in the data, as buildSummary does for 'not-expected', so no renderer can
+// print it by accident. Status is recomputed against the moved date.
+function withTestMove(model, doc, todayISO, suppressing) {
+  const moved = movedNextStart(doc, model.anchor, firstProjection(model.anchor, model.length));
+  if (moved === null) return { ...model, fromTest: false };
+  const { status, daysLate } = predictionStatus(moved, todayISO, suppressing);
+  return { ...model, date: moved, confidence: null, status, daysLate, fromTest: true };
 }
 
 export function adaptedModel(cycles, doc, todayISO) {
@@ -227,7 +244,7 @@ export function adaptedModel(cycles, doc, todayISO) {
     // Counted from the due date so it keeps running; off birth control a period
     // overdue is simply late, and absence is never the expectation.
     const neStatus = predictionStatus(firstProjection(anchor, base.length), todayISO, false);
-    return {
+    return withTestMove({
       ...base,
       model: 'no-episode',
       anchor,
@@ -236,7 +253,7 @@ export function adaptedModel(cycles, doc, todayISO) {
       previousDate: nePrevious,
       status: neStatus.status,
       daysLate: neStatus.daysLate,
-    };
+    }, doc, todayISO, false);
   }
 
   const sample = episodeCycles(cycles, doc, todayISO);
@@ -313,7 +330,7 @@ export function adaptedModel(cycles, doc, todayISO) {
     firstProjection(anchor, length), todayISO, suppressing,
   );
 
-  return {
+  return withTestMove({
     available: true,
     model: 'adapted',
     date: adaptedDate,
@@ -327,7 +344,7 @@ export function adaptedModel(cycles, doc, todayISO) {
     status,
     daysLate,
     reason: null,
-  };
+  }, doc, todayISO, suppressing);
 }
 
 export function predict(cycles, doc, todayISO) {

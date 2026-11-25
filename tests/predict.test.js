@@ -751,3 +751,39 @@ describe('adaptedModel takes naturalModel as its prior', () => {
     expect(baselineModel(cycles, d, '2015-10-01').anchor).toBe('2015-02-26');
   });
 });
+
+describe('a test outside the window moves the prediction', () => {
+  const base = {
+    spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }],
+  };
+
+  it('moves the date and says where it came from', () => {
+    const doc = { ...base, days: { '2015-03-22': { tests: { ovulation: 'positive' } } } };
+    const m = adaptedModel(buildCycles(doc), doc, '2015-03-24');
+    expect(m.date).toBe('2015-04-05');
+    expect(m.fromTest).toBe(true);
+  });
+
+  it('withholds the confidence percentage once an observation has displaced the model', () => {
+    const doc = { ...base, days: { '2015-03-22': { tests: { ovulation: 'positive' } } } };
+    expect(adaptedModel(buildCycles(doc), doc, '2015-03-24').confidence).toBeNull();
+  });
+
+  it('leaves the date and the percentage alone when the test is inside the window', () => {
+    const doc = { ...base, days: { '2015-03-11': { tests: { ovulation: 'positive' } } } };
+    const m = adaptedModel(buildCycles(doc), doc, '2015-03-12');
+    expect(m.date).toBe('2015-03-26');
+    expect(m.fromTest).toBe(false);
+    expect(m.confidence).not.toBeNull();
+  });
+
+  it('counts lateness from the moved date, not the arithmetic due date', () => {
+    // Moved date 2015-04-05; today 04-06 is 1 day late. Counted from the
+    // arithmetic due date 03-26 it would read 11 days late (5 to Mar 31, +6).
+    const doc = { ...base, days: { '2015-03-22': { tests: { ovulation: 'positive' } } } };
+    const m = adaptedModel(buildCycles(doc), doc, '2015-04-06');
+    expect(m.date).toBe('2015-04-05');
+    expect(m.status).toBe('late');
+    expect(m.daysLate).toBe(1);
+  });
+});
