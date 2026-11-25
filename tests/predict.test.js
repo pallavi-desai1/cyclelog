@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   TAU, LATE_GRACE_DAYS, lastPeriodStart, projectForward, projectPrevious,
-  predictionStatus, baselineModel, adaptedModel, predict,
+  predictionStatus, baselineModel, naturalModel, adaptedModel, predict,
 } from '../src/predict.js';
 import { describeLengths } from '../src/stats.js';
-import { lastPeriodStartOnOrBefore } from '../src/episodes.js';
+import { lastPeriodStartOnOrBefore, baselineCycles, naturalCycles } from '../src/episodes.js';
+import { buildCycles } from '../src/cycles.js';
 
 const span = (start, end) => ({ start, end, precision: 'exact', endPrecision: 'exact', source: 'clue' });
 const cycle = (start, length, extra = {}) => ({
@@ -652,5 +653,93 @@ describe('bleeding on a suppressing method', () => {
       birthControl: [episode('copper-iud', '2016-01-20', null, 'none')],
     });
     expect(predict(regularCycles, copper, '2016-02-20').adapted.status).toBe('late');
+  });
+});
+
+describe('naturalModel', () => {
+  it('reports unavailable with fewer than two natural cycles', () => {
+    const m = naturalModel([{ start: '2015-01-01', nextStart: '2015-01-29', length: 28 }], {}, '2015-02-01');
+    expect(m.available).toBe(false);
+    expect(m.model).toBe('natural');
+    expect(m.reason).toMatch(/natural/);
+  });
+
+  it('anchors on the most recent logged period start, not a frozen boundary', () => {
+    const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }] };
+    const cycles = buildCycles(d);
+    const m = naturalModel(cycles, d, '2015-03-01');
+    expect(m.available).toBe(true);
+    expect(m.anchor).toBe('2015-02-26');
+    expect(m.length).toBe(28);
+    expect(m.date).toBe('2015-03-26');
+  });
+
+  it('includes cycles that started after a method ended, which baselineModel excludes', () => {
+    const d = {
+      spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' },
+              { start: '2015-07-20' }, { start: '2015-08-17' }, { start: '2015-09-14' }],
+      birthControl: [{ method: 'implant', startedOn: '2015-03-01', endedOn: '2015-07-01', expectedEffect: 'suppress' }],
+    };
+    const cycles = buildCycles(d);
+    expect(baselineCycles(cycles, d).map(c => c.start)).toEqual(['2015-01-01', '2015-01-29']);
+    expect(naturalCycles(cycles, d).map(c => c.start))
+      .toEqual(['2015-01-01', '2015-01-29', '2015-07-20', '2015-08-17']);
+    expect(naturalModel(cycles, d, '2015-10-01').anchor).toBe('2015-09-14');
+  });
+});
+
+describe('naturalModel, discriminating cases', () => {
+  it('needs two natural cycles even when an anchor exists', () => {
+    const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }] };
+    const m = naturalModel(buildCycles(d), d, '2015-02-10');
+    expect(m.available).toBe(false);
+    expect(m.reason).toBe('needs at least 2 natural cycles, has 1');
+  });
+
+  it('anchors on the last period even when it fell inside an episode', () => {
+    const d = {
+      spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }, { start: '2015-03-26' }],
+      birthControl: [{ method: 'implant', startedOn: '2015-03-01', endedOn: null, expectedEffect: 'suppress' }],
+    };
+    const m = naturalModel(buildCycles(d), d, '2015-04-01');
+    // Natural cycles are 01-01 and 01-29 only (28, 28); the last one's nextStart
+    // is 02-26, but the most recent period start is 03-26.
+    expect(m.anchor).toBe('2015-03-26');
+    expect(m.date).toBe('2015-04-23');
+  });
+});
+
+describe('adaptedModel takes naturalModel as its prior', () => {
+  it('learns from natural cycles logged after a method ended', () => {
+    const d = {
+      spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' },
+              { start: '2015-07-20' }, { start: '2015-08-23' }, { start: '2015-09-26' }],
+      birthControl: [{ method: 'implant', startedOn: '2015-03-01', endedOn: '2015-07-01', expectedEffect: 'suppress' }],
+    };
+    const cycles = buildCycles(d);
+    // Natural lengths 28, 28, 34, 34 weighted 0.580, 0.611, 0.848, 0.904 at
+    // 2015-10-15; the 28s total 1.191, under half of 2.943, so the median is 34.
+    const a = adaptedModel(cycles, d, '2015-10-15');
+    expect(a.length).toBe(34);
+    expect(a.date).toBe('2015-10-30');
+    // The frozen baseline would say 28 from 2015-09-26, i.e. 2015-10-24.
+    expect(baselineModel(cycles, d, '2015-10-15').length).toBe(28);
+  });
+
+  it('uses the natural length off any method', () => {
+    const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }] };
+    const cycles = buildCycles(d);
+    expect(adaptedModel(cycles, d, '2015-03-01').date)
+      .toBe(naturalModel(cycles, d, '2015-03-01').date);
+  });
+
+  it('leaves baselineModel frozen for divergence', () => {
+    const d = {
+      spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' },
+              { start: '2015-07-20' }, { start: '2015-08-17' }, { start: '2015-09-14' }],
+      birthControl: [{ method: 'implant', startedOn: '2015-03-01', endedOn: '2015-07-01', expectedEffect: 'suppress' }],
+    };
+    const cycles = buildCycles(d);
+    expect(baselineModel(cycles, d, '2015-10-01').anchor).toBe('2015-02-26');
   });
 });

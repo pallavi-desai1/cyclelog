@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { days, buildSummary } from '../src/summary.js';
 
 // De-identified fixture: 28-day cycles in 2015, outside the range of any real
-// data in this repository. Every expected figure below was computed by running
-// the existing predict/cycles/stats modules on this fixture, not by hand.
+// data in this repository. The expected figures below were obtained two ways:
+// the original ones by running the predict/cycles/stats modules on this fixture,
+// and every figure changed since then by deriving it from the fixture by hand.
+// Neither is an independent check on the other; re-derive before editing one.
 const spans = () => [
   { start: '2015-01-01', end: null, source: 'test' },
   { start: '2015-01-29', end: null, source: 'test' },

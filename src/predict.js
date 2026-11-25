@@ -1,7 +1,7 @@
 import { addDays, diffDays } from './dates.js';
 import { cycleWeight, weightedMedian, weightedSd, effectiveN } from './weighted.js';
 import { confidencePercent } from './confidence.js';
-import { baselineCycles, episodeCycles, currentEpisode, sigmaForEffect } from './episodes.js';
+import { baselineCycles, naturalCycles, episodeCycles, currentEpisode, sigmaForEffect } from './episodes.js';
 import { describeLengths } from './stats.js';
 
 // How fast the adapted model trusts the current episode over the baseline.
@@ -156,8 +156,59 @@ export function baselineModel(cycles, doc, todayISO) {
   };
 }
 
+// The forward prediction's prior: every cycle no hormonal episode touched,
+// anchored on the most recent logged period. Unlike `baselineModel` it does not
+// freeze at the first episode, so natural cycles logged since keep counting.
+// Same guards as `baselineModel`, for the same reasons.
+export function naturalModel(cycles, doc, todayISO) {
+  const sample = naturalCycles(cycles, doc);
+  if (sample.length < 2) {
+    return unavailable('natural', `needs at least 2 natural cycles, has ${sample.length}`);
+  }
+
+  const weights = sample.map(cycle => cycleWeight(cycle, todayISO));
+  const lengths = sample.map(cycle => cycle.length);
+  const nEff = effectiveN(lengths, weights);
+  const length = weightedMedian(lengths, weights);
+
+  if (length === null || !(nEff > 0)) {
+    return unavailable('natural', 'every natural cycle is too old to carry weight');
+  }
+
+  const sigma = weightedSd(lengths, weights) ?? 0;
+
+  const anchor = lastPeriodStart(doc);
+  if (anchor === null) {
+    return unavailable('natural', 'no logged period start to project from');
+  }
+
+  const date = projectForward(anchor, length, todayISO);
+  if (date === null) {
+    return unavailable('natural', 'projection exceeded the step cap without reaching today');
+  }
+
+  const previousDate = projectPrevious(anchor, length, todayISO);
+  const { status, daysLate } = predictionStatus(firstProjection(anchor, length), todayISO, false);
+
+  return {
+    available: true,
+    model: 'natural',
+    date,
+    length,
+    sigma,
+    confidence: confidencePercent(sigma, nEff),
+    nEff,
+    anchor,
+    weight: null,
+    previousDate,
+    status,
+    daysLate,
+    reason: null,
+  };
+}
+
 export function adaptedModel(cycles, doc, todayISO) {
-  const base = baselineModel(cycles, doc, todayISO);
+  const base = naturalModel(cycles, doc, todayISO);
   const episode = currentEpisode(doc, todayISO);
   const anchor = lastPeriodStart(doc) ?? base.anchor;
 
