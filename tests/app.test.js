@@ -105,16 +105,16 @@ describe('app wiring', () => {
     const squash = text => text.replace(/\s+/g, ' ').trim();
     const allowed = [
       'renderSummary(openSummary)',
-      'renderCalendar(grid)',
+      'renderCalendar(grid, { caveat: openSummary.phase.caveat })',
       "''",
-      'renderDay(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
+      'renderDay({ ...dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, upcomingDates: upcomingDatesFor(openSummary, monthOf(date)), windows: windowsFor(openDoc, openSummary, monthOf(date)), }), caveat: openSummary.phase.caveat, })',
       'renderMonthPicker({ month: viewMonth, range: monthRange(openDoc, localToday()), })',
-      'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, baselineDates: ghostDatesFor(monthOf(date)), }))',
+      'renderEditor({ ...dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, upcomingDates: upcomingDatesFor(openSummary, monthOf(date)), windows: windowsFor(openDoc, openSummary, monthOf(date)), }), caveat: openSummary.phase.caveat, })',
       "renderShareCard({ state, fingerprint: state.key === null ? '' : await fingerprint(state.key), ownerUid: state.identity === null ? null : state.identity.uid, })",
       "renderViewerHeader({ scope: null, updatedAt: null, label: '', uid: viewerRecordData.identity.uid })",
       "renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid }) + renderSummary(summary)",
-      'renderCalendar(grid)',
-      'renderDay(dayDetail(viewerShared.doc, viewerDate, { todayISO: localToday(), adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date, baselineDates: [], }), { canEdit: false })',
+      'renderCalendar(grid, { caveat: viewerSummary === null ? null : viewerSummary.phase.caveat, })',
+      'renderDay({ ...dayDetail(viewerShared.doc, viewerDate, { todayISO: localToday(), adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date, upcomingDates: viewerSummary === null ? [] : upcomingDatesFor(viewerSummary, monthOf(viewerDate)), windows: viewerSummary === null ? [] : windowsFor(viewerShared.doc, viewerSummary, monthOf(viewerDate)), }), caveat: viewerSummary === null ? null : viewerSummary.phase.caveat, }, { canEdit: false })',
       'renderEpisodes(openDoc.birthControl)',
       'renderEpisodeForm({ episode: null, index: null })',
       'renderSwitchForm({ current: (openDoc.birthControl ?? []).find(episode => episode.endedOn === null) ?? null, todayISO: localToday(), })',
@@ -402,7 +402,8 @@ describe('the calendar', () => {
     const body = functionBody(app(), 'drawCalendar');
     expect(body, 'drawCalendar').not.toBeNull();
     expect(body).toMatch(/adaptedDate/);
-    expect(body).toMatch(/baselineDates/);
+    expect(body).toMatch(/windows:/);
+    expect(body).toMatch(/upcomingDates:/);
   });
 
   it('clears the grid when the vault locks', () => {
@@ -414,7 +415,7 @@ describe('the calendar', () => {
 describe('precache', () => {
   it('lists every module the app now imports', () => {
     for (const module of [
-      'src/today.js', 'src/summary.js', 'src/import.js', 'src/ui/render.js',
+      'src/today.js', 'src/summary.js', 'src/import.js', 'src/ui/render.js', 'src/phase.js',
     ]) {
       expect(sw(), module).toContain(module);
     }
@@ -449,31 +450,80 @@ describe('tapping a day', () => {
   });
 });
 
-describe('the counterfactual across every month', () => {
-  it('projects the ghost cadence for the month on screen', () => {
-    const body = functionBody(app(), 'ghostDatesFor');
-    expect(body, 'ghostDatesFor').not.toBeNull();
+describe('phases and ovulation across every month', () => {
+  it('no longer mentions the ghost', () => {
+    expect(app()).not.toContain('ghostDatesFor');
+    expect(app()).not.toContain('baselineDates');
+  });
+
+  it('projects forward from the anchor, with no silent fallback', () => {
+    const body = functionBody(app(), 'upcomingDatesFor');
+    expect(body, 'upcomingDatesFor').not.toBeNull();
     expect(body).toMatch(/projectedDates\(/);
-    expect(body).toMatch(/baseline\.length/);
-  });
-
-  it('says nothing when there is no usable natural-cycle history', () => {
-    expect(functionBody(app(), 'ghostDatesFor')).toMatch(/baseline\.available/);
-  });
-
-  it('feeds the same cadence to the grid and the day panel', () => {
-    expect(functionBody(app(), 'drawCalendar')).toMatch(/ghostDatesFor\(/);
-    expect(functionBody(app(), 'selectDay')).toMatch(/ghostDatesFor\(/);
-  });
-});
-
-describe('the ghost cadence starts at the anchor', () => {
-  // A `?? baseline.date` fallback here would project from the next ghost
-  // instead of the anchor, silently dropping every month before it.
-  it('uses the anchor with no silent fallback', () => {
-    const body = functionBody(app(), 'ghostDatesFor');
-    expect(body).toMatch(/baseline\.anchor/);
+    expect(body).toMatch(/adapted\.anchor/);
     expect(body).not.toMatch(/anchor \?\?/);
+  });
+
+  it('clips forward projections to after the next predicted period', () => {
+    // Unclipped, "Period expected later" lands on past months where her real
+    // periods already sit.
+    expect(functionBody(app(), 'upcomingDatesFor')).toMatch(/adapted\.date/);
+  });
+
+  it('actually drops projections on or before the next predicted period', async () => {
+    // The text check above is satisfied by merely reading adapted.date, so
+    // run the real function body against the real helpers.
+    const { projectedDates } = await import('../src/calendar.js');
+    const { addDays } = await import('../src/dates.js');
+    const text = app();
+    const start = text.indexOf('function upcomingDatesFor(');
+    const end = text.indexOf('\n}\n', start) + 2;
+    const upcomingDatesFor = new Function('projectedDates', 'addDays',
+      `${text.slice(start, end)}\nreturn upcomingDatesFor;`)(projectedDates, addDays);
+    // Anchor 2016-01-01, 28-day cycles: 02-26, 03-25, 04-22, 05-20. Next
+    // predicted is 04-22 itself, so the boundary must be excluded too.
+    const summary = { adapted: { anchor: '2016-01-01', length: 28, date: '2016-04-22' } };
+    const got = upcomingDatesFor(summary, '2016-03');
+    expect(got).toEqual([]);
+    expect(got).not.toContain('2016-02-26');
+    expect(got).not.toContain('2016-03-25');
+    expect(upcomingDatesFor(summary, '2016-05')).toContain('2016-05-20');
+    expect(upcomingDatesFor(summary, '2016-05')).not.toContain('2016-04-22');
+    expect(upcomingDatesFor({ adapted: { anchor: null, length: null, date: null } }, '2016-03')).toEqual([]);
+  });
+
+  it('builds the windows through the one shared builder', () => {
+    const body = functionBody(app(), 'windowsFor');
+    expect(body, 'windowsFor').not.toBeNull();
+    expect(body).toMatch(/nextStartForDoc\(/);
+    expect(body).toMatch(/cycleWindows\(/);
+    // Pinned in nextStartForDoc, once: never re-derived here.
+    expect(app()).not.toMatch(/projectForward|firstProjection/);
+  });
+
+  it('feeds the same marks to the grid, the day panel and the editor', () => {
+    for (const name of ['drawCalendar', 'selectDay', 'openEditor']) {
+      const body = functionBody(app(), name);
+      expect(body, name).toMatch(/upcomingDatesFor\(/);
+      expect(body, name).toMatch(/windowsFor\(/);
+    }
+  });
+
+  it('puts the caveat on the day detail and the calendar, where the renderers fail open', () => {
+    expect(functionBody(app(), 'drawCalendar')).toMatch(/caveat: openSummary\.phase\.caveat/);
+    expect(functionBody(app(), 'selectDay')).toMatch(/caveat: openSummary\.phase\.caveat/);
+    expect(functionBody(app(), 'drawViewerCalendar')).toMatch(/caveat:/);
+    expect(functionBody(app(), 'drawViewerDay')).toMatch(/caveat:/);
+  });
+
+  it('feeds the viewer calendar the same marks her own gets', () => {
+    const body = functionBody(app(), 'drawViewerCalendar');
+    expect(body).toMatch(/windows:/);
+    expect(body).toMatch(/upcomingDates:/);
+    expect(body).not.toMatch(/windows:\s*\[\]/);
+    expect(body).not.toMatch(/upcomingDates:\s*\[\]/);
+    expect(body).toMatch(/viewerShared\.doc/);
+    expect(body).not.toMatch(/openSummary|openDoc/);
   });
 });
 
