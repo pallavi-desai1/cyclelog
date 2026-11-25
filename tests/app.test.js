@@ -109,7 +109,7 @@ describe('app wiring', () => {
       "''",
       'renderDay({ ...dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, upcomingDates: upcomingDatesFor(openSummary, monthOf(date)), windows: windowsFor(openDoc, openSummary, monthOf(date)), }), caveat: openSummary.phase.caveat, })',
       'renderMonthPicker({ month: viewMonth, range: monthRange(openDoc, localToday()), })',
-      'renderEditor({ ...dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, upcomingDates: upcomingDatesFor(openSummary, monthOf(date)), windows: windowsFor(openDoc, openSummary, monthOf(date)), }), caveat: openSummary.phase.caveat, })',
+      'renderEditor(dayDetail(openDoc, date, { todayISO: localToday(), adaptedDate: openSummary.adapted.date, upcomingDates: upcomingDatesFor(openSummary, monthOf(date)), windows: windowsFor(openDoc, openSummary, monthOf(date)), }))',
       "renderShareCard({ state, fingerprint: state.key === null ? '' : await fingerprint(state.key), ownerUid: state.identity === null ? null : state.identity.uid, })",
       "renderViewerHeader({ scope: null, updatedAt: null, label: '', uid: viewerRecordData.identity.uid })",
       "renderViewerHeader({ scope, updatedAt, label: 'her', uid: viewerRecordData.identity.uid }) + renderSummary(summary)",
@@ -499,6 +499,40 @@ describe('phases and ovulation across every month', () => {
     expect(body).toMatch(/cycleWindows\(/);
     // Pinned in nextStartForDoc, once: never re-derived here.
     expect(app()).not.toMatch(/projectForward|firstProjection/);
+  });
+
+  it('actually builds windows from the doc, and returns none when she has no anchor', async () => {
+    const { cycleWindows, nextStartForDoc } = await import('../src/phase.js');
+    const { addDays } = await import('../src/dates.js');
+    const text = app();
+    const start = text.indexOf('function windowsFor(');
+    const end = text.indexOf('\n}\n', start) + 2;
+    const windowsFor = new Function('nextStartForDoc', 'cycleWindows', 'addDays',
+      `${text.slice(start, end)}\nreturn windowsFor;`)(nextStartForDoc, cycleWindows, addDays);
+    const doc = { spans: [
+      { start: '2016-01-01', end: '2016-01-05', source: 'test' },
+      { start: '2016-01-29', end: '2016-02-02', source: 'test' },
+    ], days: {}, birthControl: [] };
+    // Logged next start 2016-01-29: descent 01-15. Current cycle (anchor
+    // 01-29, length 28) is pinned to 02-26: descent 02-12.
+    const summary = { adapted: { anchor: '2016-01-29', length: 28, date: '2016-02-26' } };
+    const jan = windowsFor(doc, summary, '2016-01');
+    expect(jan.map(w => w.descent)).toContain('2016-01-15');
+    const feb = windowsFor(doc, summary, '2016-02');
+    expect(feb.map(w => w.descent)).toContain('2016-02-12');
+    // No anchor: the current cycle has no next start, the logged one still does.
+    const none = { adapted: { anchor: null, length: null, date: null } };
+    expect(windowsFor(doc, none, '2016-02').map(w => w.descent)).not.toContain('2016-02-12');
+    expect(windowsFor(doc, none, '2016-01').map(w => w.descent)).toEqual(['2016-01-15']);
+  });
+
+  it('never hands the viewer an always-empty marks expression', () => {
+    for (const name of ['drawViewerCalendar', 'drawViewerDay']) {
+      const body = functionBody(app(), name);
+      expect(body, name).not.toMatch(/\?\s*\[\]\s*:\s*\[\]/);
+      expect(body, name).toMatch(/:\s*windowsFor\(viewerShared\.doc, viewerSummary,/);
+      expect(body, name).toMatch(/:\s*upcomingDatesFor\(viewerSummary,/);
+    }
   });
 
   it('feeds the same marks to the grid, the day panel and the editor', () => {

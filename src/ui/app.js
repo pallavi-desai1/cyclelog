@@ -705,15 +705,12 @@ function openEditor(date) {
   // not a lock, though — the save in flight still needs to land in memory —
   // so this is a separate counter from the one the lock screen bumps.
   editSession += 1;
-  el('day-detail').innerHTML = renderEditor({
-    ...dayDetail(openDoc, date, {
-      todayISO: localToday(),
-      adaptedDate: openSummary.adapted.date,
-      upcomingDates: upcomingDatesFor(openSummary, monthOf(date)),
-      windows: windowsFor(openDoc, openSummary, monthOf(date)),
-    }),
-    caveat: openSummary.phase.caveat,
-  });
+  el('day-detail').innerHTML = renderEditor(dayDetail(openDoc, date, {
+    todayISO: localToday(),
+    adaptedDate: openSummary.adapted.date,
+    upcomingDates: upcomingDatesFor(openSummary, monthOf(date)),
+    windows: windowsFor(openDoc, openSummary, monthOf(date)),
+  }));
 }
 
 // Reads the form the editor rendered. The DOM is the only place these values

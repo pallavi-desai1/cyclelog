@@ -1,4 +1,4 @@
-import { days } from '../summary.js';
+import { days, FIXED_CAVEAT } from '../summary.js';
 import { WEEKDAYS as WEEKDAY_NAMES, MONTH_NAMES, yearsInRange } from '../calendar.js';
 
 const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -26,8 +26,13 @@ function phaseLabel(phase) {
 }
 
 // The caveat strings arrive built, in the data; this only prints them.
+// Called only where a fertile mark is on screen. If a call site forgot to pass
+// a caveat, this FAILS SAFE: it prints the fixed standing warning rather than
+// nothing (and rather than throwing, which would blank her screen). The
+// uncertainty line is deliberately NOT reconstructed here: it needs the
+// model's sigma and sample size, and the renderer must not compute thresholds.
 function caveatParagraph(caveat) {
-  if (!caveat || !caveat.fixed) return '';
+  if (!caveat || !caveat.fixed) return `<p class="caveat">${escapeHtml(FIXED_CAVEAT)}</p>`;
   const uncertainty = caveat.uncertainty ? ` ${escapeHtml(caveat.uncertainty)}` : '';
   return `<p class="caveat">${escapeHtml(caveat.fixed)}${uncertainty}</p>`;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSummary } from '../src/summary.js';
+import { buildSummary, FIXED_CAVEAT } from '../src/summary.js';
 import {
   escapeHtml, renderSummary, renderCalendar, renderDay, renderMonthPicker,
 } from '../src/ui/render.js';
@@ -657,5 +657,49 @@ describe('renderDay on a read-only screen', () => {
 
   it('keeps the button by default, so her own screen is unchanged', () => {
     expect(renderDay(detail)).toContain('id="edit-day"');
+  });
+});
+
+describe('the caveat fails safe, not open', () => {
+  const doc = { days: {}, spans: [], birthControl: [] };
+  const fertileGrid = () => monthGrid(doc, {
+    month: '2015-03', todayISO: '2015-03-10',
+    windows: [{ from: '2015-03-12', descent: '2015-03-17', to: '2015-03-17', cycleStart: '2015-03-01', fromTest: false }],
+  });
+  const dayBase = {
+    date: '2015-03-12', label: '12 March 2015', isToday: false, isFuture: false,
+    cycleStart: null, cycleDay: null, isPeriod: false, periodDay: null, hasEntry: false,
+    logged: [], source: null, isApproximate: false, method: null,
+    predicted: false, upcoming: false, isFertile: true, isDescent: false, fromTest: false,
+  };
+
+  it('prints the fixed warning under a fertile grid when no caveat was passed', () => {
+    for (const html of [renderCalendar(fertileGrid()), renderCalendar(fertileGrid(), { caveat: null })]) {
+      expect(html).toContain('class="caveat"');
+      expect(html).toContain(escapeHtml(FIXED_CAVEAT));
+    }
+  });
+
+  it('prints the fixed warning on a fertile day when no caveat was passed', () => {
+    const html = renderDay({ ...dayBase, caveat: null });
+    expect(html).toContain(escapeHtml(FIXED_CAVEAT));
+    expect(renderDay(dayBase)).toContain(escapeHtml(FIXED_CAVEAT));
+  });
+
+  it('does not invent an uncertainty line in the fallback', () => {
+    expect(renderDay(dayBase)).not.toMatch(/vary by|only a few cycles/);
+  });
+
+  it('lets an explicitly passed caveat win over the fallback', () => {
+    const caveat = { fixed: 'OWN FIXED', uncertainty: 'OWN UNSURE' };
+    for (const html of [renderCalendar(fertileGrid(), { caveat }), renderDay({ ...dayBase, caveat })]) {
+      expect(html).toContain('OWN FIXED OWN UNSURE');
+      expect(html).not.toContain(escapeHtml(FIXED_CAVEAT));
+    }
+  });
+
+  it('prints no caveat when nothing fertile is on screen', () => {
+    const plain = monthGrid(doc, { month: '2015-03', todayISO: '2015-03-10' });
+    expect(renderCalendar(plain)).not.toContain('class="caveat"');
   });
 });

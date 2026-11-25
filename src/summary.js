@@ -6,7 +6,7 @@ import { divergenceSeries, meanShift, meanShiftByEpisode } from './divergence.js
 import { diffDays } from './dates.js';
 import { cycleWindows, phaseAt, nextStartForDoc } from './phase.js';
 
-const FIXED_CAVEAT = 'Fertile days are predicted from your own past cycle lengths. '
+export const FIXED_CAVEAT = 'Fertile days are predicted from your own past cycle lengths. '
   + 'This is not contraception \u2014 a day without a mark is not a safe day.';
 
 // Which caveat goes beside the fertile window is decided HERE, in the data, for
