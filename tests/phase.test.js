@@ -326,3 +326,19 @@ describe('movedNextStart', () => {
     expect(movedNextStart(doc, '2015-03-01', '2015-03-15')).toBeNull();
   });
 });
+
+describe('movedNextStart on a hormonal method', () => {
+  const days = { '2015-03-22': { tests: { ovulation: 'positive' } } };
+  const on = effect => ({
+    days,
+    birthControl: [{ method: 'pill', startedOn: '2015-01-01', endedOn: null, expectedEffect: effect }],
+  });
+
+  it('does not move the date when the method suppresses, as the window is not drawn either', () => {
+    expect(movedNextStart(on('suppress'), '2015-03-01', '2015-03-29')).toBeNull();
+  });
+
+  it('still moves the date on a method with effect none', () => {
+    expect(movedNextStart(on('none'), '2015-03-01', '2015-03-29')).toBe('2015-04-05');
+  });
+});

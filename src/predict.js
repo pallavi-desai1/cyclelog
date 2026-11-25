@@ -211,6 +211,9 @@ export function naturalModel(cycles, doc, todayISO) {
   };
 }
 
+// A moved date can land before today (an old test): it is returned as is, with
+// status late, because the prediction is the observation-derived date, not a
+// future projection.
 // A positive ovulation test outside the predicted window moves the period date
 // (see movedNextStart). The confidence percentage is withheld then: it describes
 // the statistical model, and once a logged observation has displaced that

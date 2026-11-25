@@ -67,7 +67,13 @@ export function movedNextStart(doc, cycleStartISO, predictedNextISO) {
   if (base === null) return null;
   const test = firstPositiveTest(doc, cycleStartISO, predictedNextISO);
   const w = applyTestOverride(base, test, cycleStartISO);
-  return w.fromTest ? addDays(w.descent, LUTEAL_DAYS) : null;
+  if (!w.fromTest) return null;
+  // The test governs both the window and the date, or neither: cycleWindows
+  // draws no window when the method in force suppresses, judged at the
+  // (re-centred) descent day. Moving the date on evidence the calendar declines
+  // to draw would be the same incoherence inverted. Same check, same point.
+  if (suppressed(doc, w.descent)) return null;
+  return addDays(w.descent, LUTEAL_DAYS);
 }
 
 // Which birth-control episode governs `iso`, and what effect it expects.

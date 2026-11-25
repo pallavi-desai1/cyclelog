@@ -786,4 +786,15 @@ describe('a test outside the window moves the prediction', () => {
     expect(m.status).toBe('late');
     expect(m.daysLate).toBe(1);
   });
+
+  it('does not move the date while a suppressing method is in force', () => {
+    const doc = {
+      ...base,
+      birthControl: [{ method: 'pill', startedOn: '2015-01-01', endedOn: null, expectedEffect: 'suppress' }],
+      days: { '2015-03-22': { tests: { ovulation: 'positive' } } },
+    };
+    const m = adaptedModel(buildCycles(doc), doc, '2015-03-24');
+    expect(m.fromTest).toBe(false);
+    expect(m.date).not.toBe('2015-04-05');
+  });
 });
