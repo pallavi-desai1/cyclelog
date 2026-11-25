@@ -797,4 +797,17 @@ describe('a test outside the window moves the prediction', () => {
     expect(m.fromTest).toBe(false);
     expect(m.date).not.toBe('2015-04-05');
   });
+
+  it('moves the date on the in-episode path too, when the method expects no effect', () => {
+    const doc = {
+      ...base,
+      birthControl: [{ method: 'condom', startedOn: '2015-01-01', endedOn: null, expectedEffect: 'none' }],
+      days: { '2015-03-22': { tests: { ovulation: 'positive' } } },
+    };
+    const m = adaptedModel(buildCycles(doc), doc, '2015-03-24');
+    expect(m.model).toBe('adapted');
+    expect(m.date).toBe('2015-04-05');
+    expect(m.fromTest).toBe(true);
+    expect(m.confidence).toBeNull();
+  });
 });

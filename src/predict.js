@@ -211,19 +211,24 @@ export function naturalModel(cycles, doc, todayISO) {
   };
 }
 
-// A moved date can land before today (an old test): it is returned as is, with
-// status late, because the prediction is the observation-derived date, not a
-// future projection.
 // A positive ovulation test outside the predicted window moves the period date
 // (see movedNextStart). The confidence percentage is withheld then: it describes
 // the statistical model, and once a logged observation has displaced that
 // model's date the number no longer describes what is on screen. Withheld here,
 // in the data, as buildSummary does for 'not-expected', so no renderer can
 // print it by accident. Status is recomputed against the moved date.
-function withTestMove(model, doc, todayISO, suppressing) {
+//
+// A moved date can land before today (an old test): it is returned as is, with
+// status late, because it is the observation-derived date, not a projection.
+//
+// Status is judged with suppressing=false on purpose, not by omission: the gate
+// in movedNextStart only lets a move through when no method suppresses (effect
+// 'none'), and 'suppressing' requires effect 'suppress', so it could never be
+// true here.
+function withTestMove(model, doc, todayISO) {
   const moved = movedNextStart(doc, model.anchor, firstProjection(model.anchor, model.length));
   if (moved === null) return { ...model, fromTest: false };
-  const { status, daysLate } = predictionStatus(moved, todayISO, suppressing);
+  const { status, daysLate } = predictionStatus(moved, todayISO, false);
   return { ...model, date: moved, confidence: null, status, daysLate, fromTest: true };
 }
 
@@ -256,7 +261,7 @@ export function adaptedModel(cycles, doc, todayISO) {
       previousDate: nePrevious,
       status: neStatus.status,
       daysLate: neStatus.daysLate,
-    }, doc, todayISO, false);
+    }, doc, todayISO);
   }
 
   const sample = episodeCycles(cycles, doc, todayISO);
@@ -347,7 +352,7 @@ export function adaptedModel(cycles, doc, todayISO) {
     status,
     daysLate,
     reason: null,
-  }, doc, todayISO, suppressing);
+  }, doc, todayISO);
 }
 
 export function predict(cycles, doc, todayISO) {
