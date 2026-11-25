@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   SIGMA_BY_EFFECT, sortedEpisodes, firstEpisode, currentEpisode,
-  sigmaForEffect, usableCycles, baselineCycles, episodeCycles,
+  sigmaForEffect, usableCycles, baselineCycles, episodeCycles, naturalCycles,
 } from '../src/episodes.js';
 
 const cycle = (start, length, extra = {}) => ({
@@ -184,4 +184,61 @@ it('firstEpisode skips a no-method row recorded before any real method', () => {
     { method: 'implant', startedOn: '2015-05-01', endedOn: null, expectedEffect: 'suppress' },
   ] };
   expect(firstEpisode(d).method).toBe('implant');
+});
+
+describe('naturalCycles', () => {
+  const bc = { birthControl: [
+    { method: 'implant', startedOn: '2015-06-01', endedOn: '2015-07-15', expectedEffect: 'suppress' },
+    { method: 'nothing', startedOn: '2015-07-15', endedOn: null, expectedEffect: 'none' },
+  ] };
+  const cyc = [
+    { start: '2015-04-20', nextStart: '2015-05-20', length: 30 },
+    { start: '2015-05-20', nextStart: '2015-06-18', length: 29 }, // straddles the implant going in
+    { start: '2015-06-18', nextStart: '2015-07-20', length: 32 }, // wholly on the implant
+    { start: '2015-07-20', nextStart: '2015-08-18', length: 29 }, // after it came out
+  ];
+  const one = (extra) => ({ birthControl: [{ method: 'pill', startedOn: '2015-01-01', endedOn: null, expectedEffect: 'regulate', ...extra }] });
+
+  it('keeps only cycles no hormonal method touches at any point', () => {
+    expect(naturalCycles(cyc, bc).map(c => c.start)).toEqual(['2015-04-20', '2015-07-20']);
+  });
+
+  it('keeps every cycle when no method was ever recorded', () => {
+    expect(naturalCycles(cyc, {}).map(c => c.start)).toEqual(cyc.map(c => c.start));
+  });
+
+  it('ignores a no-method row entirely', () => {
+    const only = { birthControl: [{ method: 'nothing', startedOn: '2015-01-01', endedOn: null, expectedEffect: 'none' }] };
+    expect(naturalCycles(cyc, only)).toHaveLength(4);
+  });
+
+  it('keeps a cycle under a method with no hormonal effect', () => {
+    const condoms = { birthControl: [{ method: 'condoms', startedOn: '2015-01-01', endedOn: null, expectedEffect: 'none' }] };
+    expect(naturalCycles(cyc, condoms)).toHaveLength(4);
+  });
+
+  it('drops a cycle a hormonal method touches but does not contain', () => {
+    const brief = { birthControl: [{ method: 'pill', startedOn: '2015-05-25', endedOn: '2015-05-26', expectedEffect: 'regulate' }] };
+    expect(naturalCycles(cyc, brief).map(c => c.start)).not.toContain('2015-05-20');
+  });
+
+  it('excludes unusable cycles, as the other samples do', () => {
+    const excluded = [{ start: '2015-04-20', nextStart: '2015-05-20', length: 30, excluded: true }];
+    expect(naturalCycles(excluded, {})).toEqual([]);
+  });
+
+  it('treats an unrecognised or missing effect as hormonal', () => {
+    expect(naturalCycles(cyc, one({ expectedEffect: 'mystery' }))).toEqual([]);
+    expect(naturalCycles(cyc, one({ expectedEffect: undefined }))).toEqual([]);
+  });
+
+  it('counts an episode ending on the cycle start day as touching it', () => {
+    const d = one({ startedOn: '2015-03-01', endedOn: '2015-04-20' });
+    expect(naturalCycles(cyc, d).map(c => c.start)).not.toContain('2015-04-20');
+  });
+
+  it('counts an episode starting on the cycle nextStart day as touching it', () => {
+    const d = one({ startedOn: '2015-05-20', endedOn: '2015-05-21' });
+    expect(naturalCycles(cyc, d).map(c => c.start)).not.toContain('2015-04-20');
+  });
 });

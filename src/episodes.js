@@ -49,6 +49,30 @@ export function baselineCycles(cycles, doc) {
     && cycle.nextStart <= first.startedOn);
 }
 
+// The sample the forward prediction learns from: every usable cycle that no
+// hormonal method touched at any point. Unlike `baselineCycles` it is not frozen
+// at a boundary, so natural cycles she has from now on keep counting.
+//
+// The WHOLE cycle must be clear of a hormonal method, not merely its start.
+// `buildCycles` resolves a cycle's governing episode at its start, so a cycle
+// that began off birth control and ended at the first period after a method went
+// in would look natural while its length was produced entirely by the method.
+// This is the same bug found and fixed in `baselineCycles` (see its comment), so
+// the test is interval intersection: [startedOn, endedOn ?? infinity] against
+// [cycle.start, cycle.nextStart], both ends inclusive.
+//
+// Hormonal means not "no method" and an effect other than 'none'. An unknown or
+// missing effect counts as hormonal, the same fail-safe as `sigmaForEffect`.
+export function naturalCycles(cycles, doc) {
+  const hormonal = (doc?.birthControl ?? []).filter(
+    episode => !isNoMethod(episode) && episode.expectedEffect !== 'none',
+  );
+  return usableCycles(cycles).filter(cycle => !hormonal.some(
+    episode => episode.startedOn <= cycle.nextStart
+      && (episode.endedOn == null || episode.endedOn >= cycle.start),
+  ));
+}
+
 // The last logged period start at or before `iso`. A period that begins on the
 // day a method starts began under the natural cycle, so the boundary is
 // inclusive. Shared so `predict` and `divergence` cannot drift apart about what
