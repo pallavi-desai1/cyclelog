@@ -14,8 +14,8 @@ describe('recencyWeight', () => {
   });
 
   it('halves the weight after one half-life', () => {
-    // 2015-01-01 to 2016-07-02 is exactly 548 days.
-    expect(recencyWeight('2015-01-01', '2016-07-02')).toBeCloseTo(0.5, 6);
+    // 2015 is not a leap year, so 2015-01-01 to 2016-01-01 is exactly 365 days.
+    expect(recencyWeight('2015-01-01', '2016-01-01')).toBeCloseTo(0.5, 6);
   });
 
   it('quarters the weight after two half-lives', () => {
@@ -56,7 +56,7 @@ describe('cycleWeight', () => {
   });
 
   it('exposes the half-life it uses', () => {
-    expect(HALF_LIFE_DAYS).toBe(548);
+    expect(HALF_LIFE_DAYS).toBe(365);
   });
 });
 
@@ -157,6 +157,15 @@ describe('weightedSd', () => {
 
   it('is zero when every value is identical', () => {
     expect(weightedSd([28, 28, 28], [1, 1, 1])).toBe(0);
+  });
+
+  // Identical values have a spread of exactly 0 whatever the weights. With
+  // uneven weights the weighted mean of identical values need not round-trip
+  // to that value, which used to leak a ~1e-15 residue out as the SD.
+  it('is exactly zero for identical values under uneven weights', () => {
+    const w = [0.37464, 0.3951, 0.41667, 0.43943, 0.46343, 0.48873,
+      0.51543, 0.54357, 0.57326, 0.60457, 0.63758, 0.6724];
+    expect(weightedSd(w.map(() => 28), w)).toBe(0);
   });
 
   it('returns null for a single observation', () => {

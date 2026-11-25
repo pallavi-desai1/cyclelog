@@ -121,9 +121,9 @@ describe('baselineModel', () => {
 
   // An exact figure, not a range: confidencePercent clamps its own output to
   // 0-100, so a range assertion holds however wrong the sigma and nEff feeding
-  // it are. 72 is nEff 7.64 against zero spread, i.e. the discount term alone.
+  // it are. 67 is nEff 6.12 against zero spread, i.e. the discount term alone.
   it('reports the confidence the weighted sample supports', () => {
-    expect(baselineModel(regularCycles, d, '2016-06-01').confidence).toBe(72);
+    expect(baselineModel(regularCycles, d, '2016-06-01').confidence).toBe(67);
   });
 
   // A missing anchor must produce no prediction rather than one that is a full
@@ -154,7 +154,7 @@ describe('baselineModel', () => {
     const result = baselineModel(regularCycles, d, '2016-06-01');
     expect(result.sigma).toBe(0);
     // Zero spread makes the window term 1, so the figure is the data-sufficiency
-    // discount alone: nEff/(nEff+3) with nEff around 7.6 after recency decay.
+    // discount alone: nEff/(nEff+3) with nEff around 6.1 after recency decay.
     expect(result.confidence).toBeGreaterThan(60);
     expect(result.confidence).toBeLessThan(85);
   });

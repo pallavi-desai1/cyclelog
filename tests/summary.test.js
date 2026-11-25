@@ -135,7 +135,7 @@ describe('the adapted prediction', () => {
     expect(adapted.date).toBe('2015-07-16');
     expect(adapted.length).toBe(28);
     expect(adapted.sigma).toBe(3);
-    expect(adapted.confidence).toBe(27);
+    expect(adapted.confidence).toBe(25);
     expect(adapted.status).toBe('late');
   });
 
@@ -177,7 +177,7 @@ describe('the baseline prediction', () => {
     const { baseline } = buildSummary(doc(SUPPRESS), '2015-07-15');
     expect(baseline.available).toBe(true);
     expect(baseline.date).toBe('2015-07-16');
-    expect(baseline.confidence).toBe(45);
+    expect(baseline.confidence).toBe(42);
     expect(baseline.length).toBe(28);
   });
 

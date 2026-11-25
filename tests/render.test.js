@@ -69,7 +69,7 @@ describe('the summary card', () => {
   });
 
   it('shows the confidence figure for a real prediction', () => {
-    expect(render(doc(REGULATE), '2015-07-15')).toContain('27%');
+    expect(render(doc(REGULATE), '2015-07-15')).toContain('25%');
   });
 
   // Spec §6.2b and her instruction, at the last place it could be violated.
