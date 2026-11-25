@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { diffDays } from '../src/dates.js';
 import {
   LUTEAL_DAYS, WINDOW_DAYS, DESCENT_POSITION,
@@ -231,7 +234,21 @@ describe('cycleWindows and a late period', () => {
     // The caller pins the next start (Ruling 5), so the same window comes back
     // however late it gets. cycleWindows must not consult a clock of its own.
     const pinned = () => '2015-03-29';
-    const onTime = cycleWindows(doc, { nextStartFor: pinned, fromISO: '2015-03-01', toISO: '2015-05-31' });
-    expect(onTime.map(w => w.descent)).toEqual(['2015-03-15']);
+    const windows = cycleWindows(doc, { nextStartFor: pinned, fromISO: '2015-03-01', toISO: '2015-05-31' });
+    expect(windows.map(w => w.descent)).toEqual(['2015-03-15']);
+  });
+
+  // The real enforcement of the test above. The current cycle's window is
+  // pinned by the caller so it cannot creep forward a day per day while a
+  // period is late; a window that walked away from days already shown as
+  // fertile would un-mark them for someone using this to avoid pregnancy.
+  // The structural guarantee is that this module cannot know what day it is,
+  // so assert over the source: no clock, no today parameter.
+  it('has no clock: src/phase.js neither calls new Date() nor takes todayISO', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    const src = readFileSync(join(root, 'src/phase.js'), 'utf8');
+    expect(src).not.toMatch(/new Date\(/);
+    expect(src).not.toMatch(/todayISO/);
+    expect(src).not.toMatch(/Date\.now/);
   });
 });
