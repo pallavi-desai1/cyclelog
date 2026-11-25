@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { diffDays } from '../src/dates.js';
 import {
   LUTEAL_DAYS, WINDOW_DAYS, DESCENT_POSITION,
-  descentFor, windowFor, firstPositiveTest, applyTestOverride,
+  descentFor, windowFor, firstPositiveTest, applyTestOverride, cycleWindows,
 } from '../src/phase.js';
 
 const diffInclusive = (a, b) => diffDays(a, b) + 1;
@@ -99,5 +99,139 @@ describe('applyTestOverride', () => {
 
   it('reports no override when there is no test', () => {
     expect(applyTestOverride(w, null, '2015-03-01')).toEqual({ ...w, fromTest: false });
+  });
+});
+
+describe('cycleWindows', () => {
+  const doc = { spans: [{ start: '2015-03-01', end: '2015-03-05' },
+                        { start: '2015-03-29', end: '2015-04-02' }] };
+  const logged = start => ({ '2015-03-01': '2015-03-29', '2015-03-29': '2015-04-26' }[start] ?? null);
+
+  it('builds one window per cycle that has a next start', () => {
+    const windows = cycleWindows(doc, { nextStartFor: logged, fromISO: '2015-03-01', toISO: '2015-04-30' });
+    expect(windows.map(w => w.descent)).toEqual(['2015-03-15', '2015-04-12']);
+    expect(windows.map(w => w.cycleStart)).toEqual(['2015-03-01', '2015-03-29']);
+  });
+
+  it('keeps only windows overlapping the requested range', () => {
+    const windows = cycleWindows(doc, { nextStartFor: logged, fromISO: '2015-04-01', toISO: '2015-04-30' });
+    expect(windows.map(w => w.descent)).toEqual(['2015-04-12']);
+  });
+
+  it('omits a cycle whose next start is unknown', () => {
+    const windows = cycleWindows(doc, { nextStartFor: () => null, fromISO: '2015-03-01', toISO: '2015-04-30' });
+    expect(windows).toEqual([]);
+  });
+
+  it('returns nothing when no period has been logged', () => {
+    expect(cycleWindows({}, { nextStartFor: logged, fromISO: '2015-03-01', toISO: '2015-04-30' })).toEqual([]);
+  });
+
+  it('skips a cycle too short to hold a window instead of throwing', () => {
+    const short = { spans: [{ start: '2015-03-01' }] };
+    expect(cycleWindows(short, { nextStartFor: () => '2015-03-10', fromISO: '2015-03-01', toISO: '2015-03-31' })).toEqual([]);
+  });
+
+  it('recentres on a positive ovulation test and reports fromTest', () => {
+    const tested = { ...doc, days: { '2015-03-22': { tests: { ovulation: 'positive' } } } };
+    const windows = cycleWindows(tested, { nextStartFor: logged, fromISO: '2015-03-01', toISO: '2015-03-31' });
+    expect(windows[0]).toMatchObject({ descent: '2015-03-22', fromTest: true });
+  });
+
+  it('sorts spans before walking them', () => {
+    const unsorted = { spans: [doc.spans[1], doc.spans[0]] };
+    const windows = cycleWindows(unsorted, { nextStartFor: logged, fromISO: '2015-03-01', toISO: '2015-04-30' });
+    expect(windows.map(w => w.cycleStart)).toEqual(['2015-03-01', '2015-03-29']);
+  });
+});
+
+describe('cycleWindows suppression', () => {
+  const spans = [{ start: '2015-03-01', end: '2015-03-05' }, { start: '2015-03-29' }];
+  const logged = () => '2015-03-29';
+  const range = { nextStartFor: logged, fromISO: '2015-03-01', toISO: '2015-03-31' };
+  const withEpisode = episode => ({ spans, birthControl: [episode] });
+
+  it('draws no window when the descent day is governed by a suppressing method', () => {
+    const doc = withEpisode({ method: 'implant', startedOn: '2015-03-10', endedOn: null, expectedEffect: 'suppress' });
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+
+  it('draws no window under a regulating method either', () => {
+    const doc = withEpisode({ method: 'pill', startedOn: '2015-03-10', endedOn: null, expectedEffect: 'regulate' });
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+
+  it('draws the window under a method with no hormonal effect', () => {
+    const doc = withEpisode({ method: 'condoms', startedOn: '2015-03-10', endedOn: null, expectedEffect: 'none' });
+    expect(cycleWindows(doc, range).map(w => w.descent)).toEqual(['2015-03-15']);
+  });
+
+  it('suppresses on an unrecognised effect, as sigmaForEffect does', () => {
+    const doc = withEpisode({ method: 'mystery', startedOn: '2015-03-10', endedOn: null, expectedEffect: 'whatever' });
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+
+  it('suppresses when the effect is missing entirely', () => {
+    const doc = withEpisode({ method: 'mystery', startedOn: '2015-03-10', endedOn: null });
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+
+  it('suppresses even when the method name is stripped', () => {
+    const doc = withEpisode({ startedOn: '2015-03-10', endedOn: null, expectedEffect: 'suppress' });
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+
+  it('shows the window whole or not at all across a method boundary', () => {
+    // The method starts the day after descent, so the descent day is free and
+    // the whole six days are drawn rather than the four before the boundary.
+    const doc = withEpisode({ method: 'implant', startedOn: '2015-03-16', endedOn: null, expectedEffect: 'suppress' });
+    const windows = cycleWindows(doc, range);
+    expect(windows).toHaveLength(1);
+    expect(windows[0]).toMatchObject({ from: '2015-03-11', to: '2015-03-16' });
+  });
+
+  it('reads the most recently started episode when two overlap', () => {
+    const doc = { spans, birthControl: [
+      { method: 'implant', startedOn: '2015-03-01', endedOn: null, expectedEffect: 'suppress' },
+      { method: 'condoms', startedOn: '2015-03-10', endedOn: null, expectedEffect: 'none' },
+    ] };
+    expect(cycleWindows(doc, range).map(w => w.descent)).toEqual(['2015-03-15']);
+  });
+
+  it('prefers the still-open episode when two share a start date', () => {
+    // Open one listed first, so "last in stored order wins" would get it wrong.
+    const doc = { spans, birthControl: [
+      { method: 'condoms', startedOn: '2015-03-10', endedOn: null, expectedEffect: 'none' },
+      { method: 'implant', startedOn: '2015-03-10', endedOn: '2015-03-20', expectedEffect: 'suppress' },
+    ] };
+    expect(cycleWindows(doc, range).map(w => w.descent)).toEqual(['2015-03-15']);
+  });
+
+  it('treats endedOn as inclusive: a method removed on descent day still governs it', () => {
+    const doc = withEpisode({ method: 'implant', startedOn: '2015-03-01', endedOn: '2015-03-15', expectedEffect: 'suppress' });
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+
+  it('does not suppress once the method has ended before descent day', () => {
+    const doc = withEpisode({ method: 'implant', startedOn: '2015-03-01', endedOn: '2015-03-14', expectedEffect: 'suppress' });
+    expect(cycleWindows(doc, range).map(w => w.descent)).toEqual(['2015-03-15']);
+  });
+
+  it('suppresses on the recentred descent day when a test moves the window', () => {
+    // Method starts 03-20; arithmetic descent 03-15 is free, test descent 03-22 is not.
+    const doc = { spans, birthControl: [{ method: 'implant', startedOn: '2015-03-20', endedOn: null, expectedEffect: 'suppress' }],
+      days: { '2015-03-22': { tests: { ovulation: 'positive' } } } };
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+});
+
+describe('cycleWindows and a late period', () => {
+  it('holds the current cycle’s window where it was predicted when a period is late', () => {
+    const doc = { spans: [{ start: '2015-03-01', end: '2015-03-05' }] };
+    // The caller pins the next start (Ruling 5), so the same window comes back
+    // however late it gets. cycleWindows must not consult a clock of its own.
+    const pinned = () => '2015-03-29';
+    const onTime = cycleWindows(doc, { nextStartFor: pinned, fromISO: '2015-03-01', toISO: '2015-05-31' });
+    expect(onTime.map(w => w.descent)).toEqual(['2015-03-15']);
   });
 });

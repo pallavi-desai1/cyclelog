@@ -56,3 +56,63 @@ export function applyTestOverride(window, testISO, cycleStartISO) {
   if (recentred === null) return { ...window, fromTest: false };
   return { ...recentred, fromTest: true };
 }
+
+// Which birth-control episode governs `iso`, and what effect it expects.
+//
+// This DELIBERATELY duplicates the resolution rule of `episodeAt` in
+// src/cycles.js (later start wins; a tie on start date goes to the episode
+// still open; `endedOn` is inclusive). It is a ruled decision, not an
+// oversight: fertile-window suppression must read `expectedEffect` WITHOUT
+// passing through method-name resolution. Under the narrowest share scope the
+// partner's copy has the method name stripped, so routing through `episodeAt`
+// would silently switch suppression off on his phone. If the rule changes in
+// cycles.js, change it here too.
+const isOpenEpisode = e => e.endedOn === null || e.endedOn === undefined;
+
+function governs(e, incumbent) {
+  if (e.startedOn !== incumbent.startedOn) return e.startedOn > incumbent.startedOn;
+  if (isOpenEpisode(e) !== isOpenEpisode(incumbent)) return isOpenEpisode(e);
+  return true;
+}
+
+// Returns { covered, effect }: whether any episode covers `iso`, and the
+// governing one's expectedEffect (undefined when absent).
+function governingEffect(doc, iso) {
+  let latest = null;
+  for (const e of doc?.birthControl ?? []) {
+    if (e.startedOn > iso || (!isOpenEpisode(e) && e.endedOn < iso)) continue;
+    if (latest === null || governs(e, latest)) latest = e;
+  }
+  return latest === null ? { covered: false } : { covered: true, effect: latest.expectedEffect };
+}
+
+// Only no covering episode, or one with effect 'none', leaves a window shown.
+// Anything else, including a missing or unrecognised value, suppresses:
+// imported documents are not guaranteed a validated effect, and hiding a
+// flagged day is the direction this feature may not fail in.
+function suppressed(doc, iso) {
+  const { covered, effect } = governingEffect(doc, iso);
+  return covered && effect !== 'none';
+}
+
+// One window per cycle with a known next start, overlapping [fromISO, toISO].
+// `nextStartFor` is supplied by the caller (logged next period, or the pinned
+// projection for the current cycle) so this module needs no clock and no
+// import of predict.js. Suppression is judged at the descent day only: a window
+// is shown whole or not at all, since a window cut at a method boundary would
+// read as a narrower, more precise claim than the six days really are.
+export function cycleWindows(doc, { nextStartFor, fromISO, toISO }) {
+  const starts = (doc?.spans ?? []).map(s => s.start).sort();
+  const out = [];
+  for (const cycleStart of starts) {
+    const nextStart = nextStartFor(cycleStart);
+    if (nextStart == null) continue;
+    const base = windowFor(descentFor(nextStart), cycleStart);
+    if (base === null) continue;
+    const w = applyTestOverride(base, firstPositiveTest(doc, cycleStart, nextStart), cycleStart);
+    if (w.from > toISO || w.to < fromISO) continue;
+    if (suppressed(doc, w.descent)) continue;
+    out.push({ ...w, cycleStart });
+  }
+  return out;
+}
