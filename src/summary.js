@@ -1,7 +1,7 @@
-import { buildCycles, currentCycle } from './cycles.js';
+import { buildCycles, currentCycle, isNoMethod } from './cycles.js';
 import { cycleStats } from './stats.js';
 import { predict } from './predict.js';
-import { currentEpisode } from './episodes.js';
+import { currentEpisode, naturalCycles } from './episodes.js';
 import { divergenceSeries, meanShift, meanShiftByEpisode } from './divergence.js';
 import { diffDays } from './dates.js';
 import { cycleWindows, phaseAt, nextStartForDoc } from './phase.js';
@@ -16,8 +16,19 @@ export const FIXED_CAVEAT = 'Fertile days are predicted from your own past cycle
 // identical cycle lengths give sigma exactly 0, and "\u00b1 0 days" on a sample
 // of two would be a false claim of precision on the surface that exists to
 // stay honest. Spread wins when both fire (it is the more specific claim).
-// Exported so the two thresholds can be tested at their exact boundaries.
-export function uncertaintyCaveat(adapted) {
+// A third string outranks both: once a suppressing or regulating method ends,
+// the model has no episode to learn from and falls back on her long
+// pre-method history, so sigma and nEff look confident on the very day the
+// cycle is least predictable. `settling` is decided in the data by
+// `settlingAfterMethod` and passed in, so this stays testable with stub models.
+// Exported so the thresholds can be tested at their exact boundaries.
+export const SETTLING_CAVEAT = 'Your cycles are still settling after stopping a hormonal method, '
+  + 'so these days could be off by a week or more.';
+export const SETTLING_DAYS = 180;
+export const SETTLING_CYCLES = 3;
+
+export function uncertaintyCaveat(adapted, settling = false) {
+  if (settling) return SETTLING_CAVEAT;
   if (adapted.available && adapted.sigma > 2) {
     return `Your recent cycles vary by about \u00b1 ${Math.round(adapted.sigma)} days, `
       + 'so these days could be off by that much or more.';
@@ -29,7 +40,29 @@ export function uncertaintyCaveat(adapted) {
   return null;
 }
 
-function phaseBlock(doc, adapted, current, todayISO) {
+// True while she is recently off a hormonal method: the most recent episode
+// expected to suppress or regulate ended within SETTLING_DAYS (inclusive), or
+// fewer than SETTLING_CYCLES natural cycles have completed since it ended.
+// Not true while any such episode still covers today (she is on one, or has
+// switched straight to another), and "nothing" rows are no episode at all.
+// Reads `expectedEffect` only, never the method name, so it holds on the
+// partner's scope-stripped copy.
+export function settlingAfterMethod(doc, cycles, todayISO) {
+  const hormonal = (doc?.birthControl ?? []).filter(
+    e => !isNoMethod(e) && (e.expectedEffect === 'suppress' || e.expectedEffect === 'regulate'),
+  );
+  const covers = e => e.startedOn <= todayISO && (e.endedOn == null || e.endedOn >= todayISO);
+  if (hormonal.some(covers)) return false;
+  const ended = hormonal.filter(e => e.endedOn != null && e.endedOn < todayISO)
+    .map(e => e.endedOn).sort();
+  if (ended.length === 0) return false;
+  const last = ended[ended.length - 1];
+  if (diffDays(last, todayISO) <= SETTLING_DAYS) return true;
+  const since = naturalCycles(cycles, doc).filter(c => c.start > last);
+  return since.length < SETTLING_CYCLES;
+}
+
+function phaseBlock(doc, adapted, current, todayISO, settling) {
   const nextStartFor = nextStartForDoc(doc, {
     anchor: adapted.available ? adapted.anchor : null,
     length: adapted.available ? adapted.length : null,
@@ -42,7 +75,7 @@ function phaseBlock(doc, adapted, current, todayISO) {
     cycleDay: current ? current.dayOfCycle : null,
     window: w === null ? null : { from: w.from, descent: w.descent, to: w.to },
     fromTest: w === null ? false : w.fromTest,
-    caveat: { fixed: FIXED_CAVEAT, uncertainty: uncertaintyCaveat(adapted) },
+    caveat: { fixed: FIXED_CAVEAT, uncertainty: uncertaintyCaveat(adapted, settling) },
   };
 }
 
@@ -112,7 +145,7 @@ export function buildSummary(doc, todayISO) {
 
     headline: headlineFor(adapted),
 
-    phase: phaseBlock(doc, adapted, current, todayISO),
+    phase: phaseBlock(doc, adapted, current, todayISO, settlingAfterMethod(doc, cycles, todayISO)),
 
     adapted: {
       available: adapted.available,

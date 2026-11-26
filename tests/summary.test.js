@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { days, buildSummary, uncertaintyCaveat } from '../src/summary.js';
+import { addDays } from '../src/dates.js';
 
 // De-identified fixture: 28-day cycles in 2015, outside the range of any real
 // data in this repository. The expected figures below were obtained two ways:
@@ -287,6 +288,117 @@ describe('uncertaintyCaveat boundaries', () => {
 
   it('gives the sample string, never a number, when the model is unavailable', () => {
     expect(uncertaintyCaveat({ available: false, sigma: null, nEff: 0 })).toBe(SAMPLE);
+  });
+});
+
+const SETTLING = 'Your cycles are still settling after stopping a hormonal method, '
+  + 'so these days could be off by a week or more.';
+
+describe('uncertaintyCaveat while cycles settle after a hormonal method', () => {
+  const m = (sigma, nEff) => ({ available: true, sigma, nEff });
+
+  it('wins over the spread string', () => {
+    expect(uncertaintyCaveat(m(5, 10), true)).toBe(SETTLING);
+  });
+
+  it('wins over the sample string', () => {
+    expect(uncertaintyCaveat(m(0, 2), true)).toBe(SETTLING);
+    expect(uncertaintyCaveat({ available: false, sigma: null, nEff: 0 }, true)).toBe(SETTLING);
+  });
+
+  it('fires even when the model looks perfectly confident', () => {
+    expect(uncertaintyCaveat(m(0, 20), true)).toBe(SETTLING);
+  });
+
+  it('leaves the two existing strings alone when not settling', () => {
+    expect(uncertaintyCaveat(m(0, 20), false)).toBeNull();
+    expect(uncertaintyCaveat(m(0, 20))).toBeNull();
+  });
+});
+
+describe('summary.phase.caveat after a hormonal method ends', () => {
+  // Cycles of the given lengths, starting 2015-01-01 (the last has no next start).
+  const spansFor = (lengths, first = '2015-01-01') => {
+    const out = [{ start: first }];
+    for (const n of lengths) out.push({ start: addDays(out[out.length - 1].start, n) });
+    return out;
+  };
+  const EPISODE_END = '2015-03-01';
+  const episode = (effect, endedOn = EPISODE_END) => ({
+    method: 'implant', startedOn: '2015-01-01', endedOn, expectedEffect: effect,
+  });
+  // Four completed cycles of 28 days, all starting after the episode ended.
+  const after = (birthControl, lengths = [28, 28, 28, 28]) => ({
+    version: 1, days: {}, gaps: [], birthControl, spans: spansFor(lengths, '2015-03-10'),
+  });
+  const caveat = (d, today) => buildSummary(d, today).phase.caveat.uncertainty;
+
+  it('fires the day she comes off, though 28 long cycles look confident (the reported case)', () => {
+    const lengths = [];
+    for (let i = 0; i < 28; i++) lengths.push([26, 31, 28, 29, 27, 30][i % 6]);
+    const d = { version: 1, days: {}, gaps: [], spans: spansFor(lengths),
+      birthControl: [{ method: 'implant', startedOn: '2017-04-01', endedOn: '2017-06-01', expectedEffect: 'suppress' }] };
+    const s = buildSummary(d, '2017-07-01');
+    expect(s.adapted.sigma).toBeLessThanOrEqual(2);
+    expect(s.adapted.nEff).toBeGreaterThanOrEqual(6);
+    expect(s.phase.caveat.uncertainty).toBe(SETTLING);
+  });
+
+  it('fires 180 days after the method ended', () => {
+    expect(caveat(after([episode('suppress')]), addDays(EPISODE_END, 180))).toBe(SETTLING);
+  });
+
+  it('does not fire 181 days after, once three natural cycles have completed', () => {
+    expect(caveat(after([episode('suppress')]), addDays(EPISODE_END, 181))).not.toBe(SETTLING);
+  });
+
+  it('fires past 180 days while fewer than three natural cycles have completed since', () => {
+    // Two completed cycles (the third span has no next start yet).
+    const d = after([episode('regulate')], [28, 28]);
+    expect(caveat(d, addDays(EPISODE_END, 300))).toBe(SETTLING);
+  });
+
+  it('counts only cycles completed after the method ended, not her pre-method ones', () => {
+    const d = {
+      version: 1, days: {}, gaps: [],
+      spans: [...spansFor([28, 28, 28, 28]), { start: '2015-06-01' }, { start: '2015-06-29' }, { start: '2015-07-27' }],
+      birthControl: [{ method: 'pill', startedOn: '2015-05-01', endedOn: '2015-05-20', expectedEffect: 'regulate' }],
+    };
+    // Pre-method starts: 01-01, 01-29, 02-26, 03-26, 04-23. Two cycles complete after 05-20.
+    expect(caveat(d, addDays('2015-05-20', 300))).toBe(SETTLING);
+  });
+
+  it('stops firing past 180 days at three completed natural cycles', () => {
+    const d = after([episode('regulate')], [28, 28, 28]);
+    expect(caveat(d, addDays(EPISODE_END, 300))).not.toBe(SETTLING);
+  });
+
+  it('does not fire for a method with no hormonal effect', () => {
+    expect(caveat(after([episode('none')]), addDays(EPISODE_END, 30))).not.toBe(SETTLING);
+  });
+
+  it('does not fire while she is still on the method', () => {
+    expect(caveat(after([episode('suppress', null)]), addDays(EPISODE_END, 30))).not.toBe(SETTLING);
+  });
+
+  it('does not fire after a switch from one hormonal method straight to another', () => {
+    const d = after([episode('suppress', '2015-03-05'),
+      { method: 'pill', startedOn: '2015-03-05', endedOn: null, expectedEffect: 'regulate' }]);
+    expect(caveat(d, '2015-04-01')).not.toBe(SETTLING);
+  });
+
+  it('ignores a "nothing" row', () => {
+    const d = after([{ method: 'nothing', startedOn: '2015-01-01', endedOn: EPISODE_END, expectedEffect: 'suppress' }]);
+    expect(caveat(d, addDays(EPISODE_END, 30))).not.toBe(SETTLING);
+  });
+
+  it('still fires on the partner\'s copy, where the method name is stripped', () => {
+    const { method, ...stripped } = episode('suppress');
+    expect(caveat(after([stripped]), addDays(EPISODE_END, 30))).toBe(SETTLING);
+  });
+
+  it('does not fire with no episodes at all', () => {
+    expect(caveat(after([]), '2015-08-01')).not.toBe(SETTLING);
   });
 });
 
