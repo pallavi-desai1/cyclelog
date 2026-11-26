@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { days, buildSummary } from '../src/summary.js';
+import { days, buildSummary, uncertaintyCaveat } from '../src/summary.js';
+import { addDays } from '../src/dates.js';
 
 // De-identified fixture: 28-day cycles in 2015, outside the range of any real
-// data in this repository. Every expected figure below was computed by running
-// the existing predict/cycles/stats modules on this fixture, not by hand.
+// data in this repository. The expected figures below were obtained two ways:
+// the original ones by running the predict/cycles/stats modules on this fixture,
+// and every figure changed since then by deriving it from the fixture by hand.
+// Neither is an independent check on the other; re-derive before editing one.
 const spans = () => [
   { start: '2015-01-01', end: null, source: 'test' },
   { start: '2015-01-29', end: null, source: 'test' },
@@ -135,7 +138,7 @@ describe('the adapted prediction', () => {
     expect(adapted.date).toBe('2015-07-16');
     expect(adapted.length).toBe(28);
     expect(adapted.sigma).toBe(3);
-    expect(adapted.confidence).toBe(27);
+    expect(adapted.confidence).toBe(25);
     expect(adapted.status).toBe('late');
   });
 
@@ -177,7 +180,7 @@ describe('the baseline prediction', () => {
     const { baseline } = buildSummary(doc(SUPPRESS), '2015-07-15');
     expect(baseline.available).toBe(true);
     expect(baseline.date).toBe('2015-07-16');
-    expect(baseline.confidence).toBe(45);
+    expect(baseline.confidence).toBe(42);
     expect(baseline.length).toBe(28);
   });
 
@@ -254,5 +257,300 @@ describe('the baseline anchor', () => {
     const { baseline } = buildSummary(doc(SUPPRESS), '2015-07-15');
     expect(baseline.anchor).not.toBe(baseline.date);
     expect(baseline.anchor < baseline.date).toBe(true);
+  });
+});
+
+const SAMPLE = 'This prediction is based on only a few cycles, '
+  + 'so these days could be off by several days or more.';
+
+describe('uncertaintyCaveat boundaries', () => {
+  const m = (sigma, nEff) => ({ available: true, sigma, nEff });
+
+  it('does not fire the spread caveat at sigma exactly 2', () => {
+    // 2 > 2 is false; nEff 10 is not thin, so nothing fires.
+    expect(uncertaintyCaveat(m(2, 10))).toBeNull();
+  });
+
+  it('fires the spread caveat just above 2, rounded', () => {
+    expect(uncertaintyCaveat(m(2.1, 10))).toBe(
+      'Your recent cycles vary by about \u00b1 2 days, so these days could be off by that much or more.',
+    );
+  });
+
+  it('does not fire the sample caveat at nEff exactly 6', () => {
+    // 6 < 6 is false; sigma 0 is not spread.
+    expect(uncertaintyCaveat(m(0, 6))).toBeNull();
+  });
+
+  it('fires the sample caveat just below 6', () => {
+    expect(uncertaintyCaveat(m(0, 5.99))).toBe(SAMPLE);
+  });
+
+  it('gives the sample string, never a number, when the model is unavailable', () => {
+    expect(uncertaintyCaveat({ available: false, sigma: null, nEff: 0 })).toBe(SAMPLE);
+  });
+});
+
+const SETTLING = 'Your cycles are still settling after stopping a hormonal method, '
+  + 'so these days could be off by a week or more.';
+
+describe('uncertaintyCaveat while cycles settle after a hormonal method', () => {
+  const m = (sigma, nEff) => ({ available: true, sigma, nEff });
+
+  it('wins over the spread string', () => {
+    expect(uncertaintyCaveat(m(5, 10), true)).toBe(SETTLING);
+  });
+
+  it('wins over the sample string', () => {
+    expect(uncertaintyCaveat(m(0, 2), true)).toBe(SETTLING);
+    expect(uncertaintyCaveat({ available: false, sigma: null, nEff: 0 }, true)).toBe(SETTLING);
+  });
+
+  it('fires even when the model looks perfectly confident', () => {
+    expect(uncertaintyCaveat(m(0, 20), true)).toBe(SETTLING);
+  });
+
+  it('leaves the two existing strings alone when not settling', () => {
+    expect(uncertaintyCaveat(m(0, 20), false)).toBeNull();
+    expect(uncertaintyCaveat(m(0, 20))).toBeNull();
+  });
+});
+
+describe('summary.phase.caveat after a hormonal method ends', () => {
+  // Cycles of the given lengths, starting 2015-01-01 (the last has no next start).
+  const spansFor = (lengths, first = '2015-01-01') => {
+    const out = [{ start: first }];
+    for (const n of lengths) out.push({ start: addDays(out[out.length - 1].start, n) });
+    return out;
+  };
+  const EPISODE_END = '2015-03-01';
+  const episode = (effect, endedOn = EPISODE_END) => ({
+    method: 'implant', startedOn: '2015-01-01', endedOn, expectedEffect: effect,
+  });
+  // Four completed cycles of 28 days, all starting after the episode ended.
+  const after = (birthControl, lengths = [28, 28, 28, 28]) => ({
+    version: 1, days: {}, gaps: [], birthControl, spans: spansFor(lengths, '2015-03-10'),
+  });
+  const caveat = (d, today) => buildSummary(d, today).phase.caveat.uncertainty;
+
+  it('fires the day she comes off, though 28 long cycles look confident (the reported case)', () => {
+    const lengths = [];
+    for (let i = 0; i < 28; i++) lengths.push([26, 31, 28, 29, 27, 30][i % 6]);
+    const d = { version: 1, days: {}, gaps: [], spans: spansFor(lengths),
+      birthControl: [{ method: 'implant', startedOn: '2017-04-01', endedOn: '2017-06-01', expectedEffect: 'suppress' }] };
+    const s = buildSummary(d, '2017-07-01');
+    expect(s.adapted.sigma).toBeLessThanOrEqual(2);
+    expect(s.adapted.nEff).toBeGreaterThanOrEqual(6);
+    expect(s.phase.caveat.uncertainty).toBe(SETTLING);
+  });
+
+  it('fires 180 days after the method ended', () => {
+    expect(caveat(after([episode('suppress')]), addDays(EPISODE_END, 180))).toBe(SETTLING);
+  });
+
+  it('does not fire 181 days after, once three natural cycles have completed', () => {
+    expect(caveat(after([episode('suppress')]), addDays(EPISODE_END, 181))).not.toBe(SETTLING);
+  });
+
+  it('fires past 180 days while fewer than three natural cycles have completed since', () => {
+    // Two completed cycles (the third span has no next start yet).
+    const d = after([episode('regulate')], [28, 28]);
+    expect(caveat(d, addDays(EPISODE_END, 300))).toBe(SETTLING);
+  });
+
+  it('counts only cycles completed after the method ended, not her pre-method ones', () => {
+    const d = {
+      version: 1, days: {}, gaps: [],
+      spans: [...spansFor([28, 28, 28, 28]), { start: '2015-06-01' }, { start: '2015-06-29' }, { start: '2015-07-27' }],
+      birthControl: [{ method: 'pill', startedOn: '2015-05-01', endedOn: '2015-05-20', expectedEffect: 'regulate' }],
+    };
+    // Pre-method starts: 01-01, 01-29, 02-26, 03-26, 04-23. Two cycles complete after 05-20.
+    expect(caveat(d, addDays('2015-05-20', 300))).toBe(SETTLING);
+  });
+
+  it('stops firing past 180 days at three completed natural cycles', () => {
+    const d = after([episode('regulate')], [28, 28, 28]);
+    expect(caveat(d, addDays(EPISODE_END, 300))).not.toBe(SETTLING);
+  });
+
+  it('does not fire for a method with no hormonal effect', () => {
+    expect(caveat(after([episode('none')]), addDays(EPISODE_END, 30))).not.toBe(SETTLING);
+  });
+
+  it('does not fire while she is still on the method', () => {
+    expect(caveat(after([episode('suppress', null)]), addDays(EPISODE_END, 30))).not.toBe(SETTLING);
+  });
+
+  it('does not fire after a switch from one hormonal method straight to another', () => {
+    const d = after([episode('suppress', '2015-03-05'),
+      { method: 'pill', startedOn: '2015-03-05', endedOn: null, expectedEffect: 'regulate' }]);
+    expect(caveat(d, '2015-04-01')).not.toBe(SETTLING);
+  });
+
+  it('ignores a "nothing" row', () => {
+    const d = after([{ method: 'nothing', startedOn: '2015-01-01', endedOn: EPISODE_END, expectedEffect: 'suppress' }]);
+    expect(caveat(d, addDays(EPISODE_END, 30))).not.toBe(SETTLING);
+  });
+
+  it('still fires on the partner\'s copy, where the method name is stripped', () => {
+    const { method, ...stripped } = episode('suppress');
+    expect(caveat(after([stripped]), addDays(EPISODE_END, 30))).toBe(SETTLING);
+  });
+
+  it('does not fire with no episodes at all', () => {
+    expect(caveat(after([]), '2015-08-01')).not.toBe(SETTLING);
+  });
+});
+
+describe('summary.phase', () => {
+  const pdoc = () => ({
+    spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }],
+  });
+  const FIXED = 'Fertile days are predicted from your own past cycle lengths. '
+    + 'This is not contraception \u2014 a day without a mark is not a safe day.';
+
+  it('names the phase and the day of the cycle', () => {
+    const s = buildSummary(pdoc(), '2015-03-01');
+    expect(s.phase.name).toBe('follicular');
+    expect(s.phase.cycleDay).toBe(4);
+  });
+
+  it('carries the current window', () => {
+    // Anchor 2015-02-26 at 28 days predicts 2015-03-26; descent 2015-03-12.
+    expect(buildSummary(pdoc(), '2015-03-12').phase.window)
+      .toEqual({ from: '2015-03-08', descent: '2015-03-12', to: '2015-03-13' });
+    expect(buildSummary(pdoc(), '2015-03-12').phase.name).toBe('fertile');
+  });
+
+  it('holds the window still while the period is late, instead of walking it forward', () => {
+    // Period due 2015-03-26. On 2015-03-30 it is 4 days late; projectForward
+    // would give 2015-04-23 (descent 04-09). The pinned window stays 03-08..03-13
+    // and the day falls into the luteal phase.
+    const late = buildSummary(pdoc(), '2015-03-30').phase;
+    expect(late.window).toEqual({ from: '2015-03-08', descent: '2015-03-12', to: '2015-03-13' });
+    expect(late.name).toBe('luteal');
+    // A day marked fertile yesterday-of-the-window is not un-marked by the clock.
+    expect(buildSummary(pdoc(), '2015-04-20').phase.window)
+      .toEqual({ from: '2015-03-08', descent: '2015-03-12', to: '2015-03-13' });
+  });
+
+  it('re-centres the window and flags fromTest when a positive test lies outside it', () => {
+    const d = pdoc();
+    d.days = { '2015-03-16': { tests: { ovulation: 'positive' } } };
+    const s = buildSummary(d, '2015-03-16');
+    // Window recentred: descent 03-16, from 03-12, to 03-17.
+    expect(s.phase.window).toEqual({ from: '2015-03-12', descent: '2015-03-16', to: '2015-03-17' });
+    expect(s.phase.fromTest).toBe(true);
+    expect(s.adapted.fromTest).toBe(true);
+    expect(buildSummary(pdoc(), '2015-03-16').phase.fromTest).toBe(false);
+  });
+
+  it('still moves the predicted date to the test day plus fourteen', () => {
+    const d = pdoc();
+    d.days = { '2015-03-16': { tests: { ovulation: 'positive' } } };
+    // 03-16 + 14 = 03-30 (arithmetic was 03-26).
+    expect(buildSummary(d, '2015-03-16').adapted.date).toBe('2015-03-30');
+    expect(buildSummary(pdoc(), '2015-03-16').adapted.date).toBe('2015-03-26');
+  });
+
+  it('leaves the window unmoved and fromTest false when the test is inside it', () => {
+    const d = pdoc();
+    d.days = { '2015-03-10': { tests: { ovulation: 'positive' } } };
+    const s = buildSummary(d, '2015-03-10');
+    expect(s.phase.window).toEqual({ from: '2015-03-08', descent: '2015-03-12', to: '2015-03-13' });
+    expect(s.phase.fromTest).toBe(false);
+    expect(s.adapted.date).toBe('2015-03-26');
+  });
+
+  it('always carries the fixed caveat, verbatim', () => {
+    expect(buildSummary(pdoc(), '2015-03-01').phase.caveat.fixed).toBe(FIXED);
+    expect(buildSummary({}, '2015-03-01').phase.caveat.fixed).toBe(FIXED);
+  });
+
+  it('says the sample is thin, not that the cycles vary, when every cycle is the same length', () => {
+    // Two 28-day cycles: sigma is exactly 0 and nEff < 2, so the caveat fires on
+    // sample size alone. A "± 0 days" claim here would be a false precision.
+    const c = buildSummary(pdoc(), '2015-03-01').phase.caveat.uncertainty;
+    expect(c).toBe('This prediction is based on only a few cycles, '
+      + 'so these days could be off by several days or more.');
+    expect(c).not.toMatch(/±/);
+  });
+
+  it('names the spread, with the model\u2019s own rounded sigma, when cycles vary', () => {
+    // Cycles of 24 and 32 days. Weights 0.5^(age/365): ages 59 and 35 days give
+    // 0.8940 and 0.9357. Weighted mean 28.09; sum w(x-m)^2 = 29.26; denominator
+    // v1 - v2/v1 = 1.8297 - 0.9153 = 0.9144; variance 32.0; sigma 5.66 -> N = 6.
+    const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-25' }, { start: '2015-02-26' }] };
+    const s = buildSummary(d, '2015-03-01');
+    expect(s.adapted.sigma).toBeGreaterThan(5.5);
+    expect(s.adapted.sigma).toBeLessThan(5.8);
+    expect(s.phase.caveat.uncertainty).toBe(
+      'Your recent cycles vary by about \u00b1 6 days, so these days could be off by that much or more.',
+    );
+  });
+
+  it('adds no uncertainty caveat when the cycles are regular and the sample is large', () => {
+    // 13 starts 28 days apart from 2015-01-01 -> 12 usable cycles, all 28 days:
+    // sigma = 0. Today is the last start (day 337 of the year, 336 days after the
+    // first), so the oldest cycle is 336 days old and every weight is at least
+    // 0.5^(336/365) = 0.528; nEff >= 12*0.528 = 6.3 > 6.
+    const starts = Array.from({ length: 13 }, (_, i) => {
+      const d = new Date(Date.UTC(2015, 0, 1 + 28 * i));
+      return d.toISOString().slice(0, 10);
+    });
+    const d = { spans: starts.map(start => ({ start })) };
+    expect(starts[12]).toBe('2015-12-03');
+    const s = buildSummary(d, starts[12]);
+    expect(s.adapted.sigma).toBe(0);
+    expect(s.adapted.nEff).toBeGreaterThan(6);
+    expect(s.phase.caveat.uncertainty).toBeNull();
+  });
+
+  it('exposes the anchor the forward projections run from', () => {
+    expect(buildSummary(pdoc(), '2015-03-01').adapted.anchor).toBe('2015-02-26');
+  });
+
+  it('reports no phase when nothing is logged', () => {
+    const s = buildSummary({}, '2015-03-01');
+    expect(s.phase.name).toBe('unknown');
+    expect(s.phase.cycleDay).toBeNull();
+    expect(s.phase.window).toBeNull();
+    // Unavailable model: sigma is null, and no number may be claimed.
+    expect(s.phase.caveat.uncertainty).toBe(SAMPLE);
+  });
+});
+
+describe('the caveat copy she will actually read', () => {
+  const real = [
+    buildSummary(doc(SUPPRESS), '2015-07-15').phase.caveat.fixed,
+    uncertaintyCaveat({ available: true, sigma: 5, nEff: 10 }),
+    uncertaintyCaveat({ available: true, sigma: 0, nEff: 2 }),
+    uncertaintyCaveat({ available: true, sigma: 0, nEff: 20 }, true),
+  ];
+
+  it('has all four strings to check', () => {
+    for (const text of real) expect(text).toMatch(/\S/);
+    expect(new Set(real).size).toBe(4);
+  });
+
+  // This is the only place the guarantee about the words she reads can be
+  // made. The fixed copy says "is not a safe day" to deny it, so a negation
+  // directly before "safe day" is allowed and nothing else is.
+  const BANNED = /safe to|safe window|safe day|safe days|no risk|low risk|can'?t get pregnant|cannot get pregnant|infertile|not fertile|unprotected/i;
+  const NEGATED_SAFE_DAY = /\b(not|isn'?t|never)\b[^.]{0,20}safe day/gi;
+
+  it('never says or implies that an unmarked day is safe', () => {
+    for (const text of real) expect(text.replace(NEGATED_SAFE_DAY, '')).not.toMatch(BANNED);
+  });
+
+  it('the ban would catch the phrasings it exists for', () => {
+    for (const bad of ['This is a safe day.', 'There is no risk on the other days.',
+      'Low risk outside the window.', 'You cannot get pregnant now.', 'An infertile phase.',
+      'Safe to skip protection.', 'This day is not a safe day, but the next is a safe day.']) {
+      expect(bad.replace(NEGATED_SAFE_DAY, ''), bad).toMatch(BANNED);
+    }
+    for (const fine of ['a day without a mark is not a safe day', "this isn't a safe day", 'never a safe day']) {
+      expect(fine.replace(NEGATED_SAFE_DAY, ''), fine).not.toMatch(BANNED);
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   SIGMA_BY_EFFECT, sortedEpisodes, firstEpisode, currentEpisode,
-  sigmaForEffect, usableCycles, baselineCycles, episodeCycles,
+  sigmaForEffect, usableCycles, baselineCycles, episodeCycles, naturalCycles,
 } from '../src/episodes.js';
 
 const cycle = (start, length, extra = {}) => ({
@@ -175,5 +175,78 @@ describe('episodeCycles', () => {
       birthControl: [episode('pill', '2015-01-01', '2015-06-30', 'regulate'), episode('implant', '2016-06-01')],
     });
     expect(episodeCycles(cycles, d, '2016-10-01').map(c => c.start)).toEqual(['2016-07-01', '2016-08-15']);
+  });
+});
+
+it('firstEpisode skips a no-method row recorded before any real method', () => {
+  const d = { birthControl: [
+    { method: 'nothing', startedOn: '2015-01-01', endedOn: '2015-05-01', expectedEffect: 'none' },
+    { method: 'implant', startedOn: '2015-05-01', endedOn: null, expectedEffect: 'suppress' },
+  ] };
+  expect(firstEpisode(d).method).toBe('implant');
+});
+
+describe('naturalCycles', () => {
+  const bc = { birthControl: [
+    { method: 'implant', startedOn: '2015-06-01', endedOn: '2015-07-15', expectedEffect: 'suppress' },
+    { method: 'nothing', startedOn: '2015-07-15', endedOn: null, expectedEffect: 'none' },
+  ] };
+  const cyc = [
+    { start: '2015-04-20', nextStart: '2015-05-20', length: 30 },
+    { start: '2015-05-20', nextStart: '2015-06-18', length: 29 }, // straddles the implant going in
+    { start: '2015-06-18', nextStart: '2015-07-20', length: 32 }, // wholly on the implant
+    { start: '2015-07-20', nextStart: '2015-08-18', length: 29 }, // after it came out
+  ];
+  const one = (extra) => ({ birthControl: [{ method: 'pill', startedOn: '2015-01-01', endedOn: null, expectedEffect: 'regulate', ...extra }] });
+
+  it('keeps only cycles no hormonal method touches at any point', () => {
+    expect(naturalCycles(cyc, bc).map(c => c.start)).toEqual(['2015-04-20', '2015-07-20']);
+  });
+
+  it('keeps every cycle when no method was ever recorded', () => {
+    expect(naturalCycles(cyc, {}).map(c => c.start)).toEqual(cyc.map(c => c.start));
+  });
+
+  it('ignores a no-method row entirely', () => {
+    const only = { birthControl: [{ method: 'nothing', startedOn: '2015-01-01', endedOn: null, expectedEffect: 'none' }] };
+    expect(naturalCycles(cyc, only)).toHaveLength(4);
+  });
+
+  it('keeps a cycle under a method with no hormonal effect', () => {
+    const condoms = { birthControl: [{ method: 'condoms', startedOn: '2015-01-01', endedOn: null, expectedEffect: 'none' }] };
+    expect(naturalCycles(cyc, condoms)).toHaveLength(4);
+  });
+
+  it('drops a cycle a hormonal method touches but does not contain', () => {
+    const brief = { birthControl: [{ method: 'pill', startedOn: '2015-05-25', endedOn: '2015-05-26', expectedEffect: 'regulate' }] };
+    expect(naturalCycles(cyc, brief).map(c => c.start)).not.toContain('2015-05-20');
+  });
+
+  it('excludes unusable cycles, as the other samples do', () => {
+    const excluded = [{ start: '2015-04-20', nextStart: '2015-05-20', length: 30, excluded: true }];
+    expect(naturalCycles(excluded, {})).toEqual([]);
+  });
+
+  it('treats an unrecognised or missing effect as hormonal', () => {
+    expect(naturalCycles(cyc, one({ expectedEffect: 'mystery' }))).toEqual([]);
+    expect(naturalCycles(cyc, one({ expectedEffect: undefined }))).toEqual([]);
+  });
+
+  it('DROPS a cycle when an episode ends exactly on its start (hormones linger, conservative)', () => {
+    const d = one({ startedOn: '2015-03-01', endedOn: '2015-04-20' });
+    expect(naturalCycles(cyc, d).map(c => c.start)).not.toContain('2015-04-20');
+  });
+
+  it('KEEPS a cycle when an episode starts exactly on its nextStart (that day belongs to the next cycle)', () => {
+    const d = one({ startedOn: '2015-05-20', endedOn: '2015-05-21' });
+    expect(naturalCycles(cyc, d).map(c => c.start)).toContain('2015-04-20');
+  });
+
+  it('agrees with baselineCycles about the boundary for a single hormonal episode', () => {
+    const d = one({ startedOn: '2015-06-18', endedOn: null });
+    const cs = [...cyc, { start: '2015-03-20', nextStart: '2015-04-20', length: 31 }].sort((a, b) => a.start.localeCompare(b.start));
+    const nat = naturalCycles(cs, d).map(c => c.start);
+    expect(nat).toEqual(baselineCycles(cs, d).map(c => c.start));
+    expect(nat).toContain('2015-05-20'); // nextStart === startedOn, kept by both
   });
 });

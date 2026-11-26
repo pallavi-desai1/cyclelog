@@ -1,4 +1,4 @@
-import { days } from '../summary.js';
+import { days, FIXED_CAVEAT } from '../summary.js';
 import { WEEKDAYS as WEEKDAY_NAMES, MONTH_NAMES, yearsInRange } from '../calendar.js';
 
 const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -9,7 +9,6 @@ export function escapeHtml(value) {
 }
 
 const one = value => (Number.isFinite(value) ? value.toFixed(1) : '');
-const signed = value => (Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}` : '');
 
 // Every line is built only when its data exists, which is what keeps "null"
 // and "NaN" off a screen she reads out at an appointment.
@@ -19,8 +18,27 @@ function line(label, value, className = '') {
   return `<p${classes}><span class="label">${escapeHtml(label)}</span> <span class="value">${value}</span></p>`;
 }
 
+// 'unknown' is the absence of a phase, not a phase: nothing is printed.
+function phaseLabel(phase) {
+  if (!phase || !phase.name || phase.name === 'unknown') return null;
+  const name = phase.name === 'fertile' ? 'fertile window, predicted' : phase.name;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+// The caveat strings arrive built, in the data; this only prints them.
+// Called only where a fertile mark is on screen. If a call site forgot to pass
+// a caveat, this FAILS SAFE: it prints the fixed standing warning rather than
+// nothing (and rather than throwing, which would blank her screen). The
+// uncertainty line is deliberately NOT reconstructed here: it needs the
+// model's sigma and sample size, and the renderer must not compute thresholds.
+function caveatParagraph(caveat) {
+  if (!caveat || !caveat.fixed) return `<p class="caveat">${escapeHtml(FIXED_CAVEAT)}</p>`;
+  const uncertainty = caveat.uncertainty ? ` ${escapeHtml(caveat.uncertainty)}` : '';
+  return `<p class="caveat">${escapeHtml(caveat.fixed)}${uncertainty}</p>`;
+}
+
 export function renderSummary(summary) {
-  const { lastPeriod, history, method, headline, adapted, baseline, divergence } = summary;
+  const { lastPeriod, history, method, headline, adapted, phase } = summary;
 
   const parts = [`<section class="card headline ${escapeHtml(headline.kind)}">`];
   parts.push(`<h2>${escapeHtml(headline.text)}</h2>`);
@@ -28,6 +46,19 @@ export function renderSummary(summary) {
   if (headline.kind === 'no-period' && headline.daysLate !== null) {
     parts.push(`<p class="since">${escapeHtml(days(headline.daysLate))} since one was due</p>`);
   }
+
+  const phaseName = phaseLabel(phase);
+  if (phaseName !== null) {
+    const day = Number.isFinite(phase.cycleDay) ? `, Day ${escapeHtml(phase.cycleDay)}` : '';
+    parts.push(line('Phase', `${escapeHtml(phaseName)}${day}`, 'phase'));
+  }
+
+  // The caveats are built in buildSummary and printed as given. Gated on the
+  // window covering today, not on the phase name: a short cycle can bleed
+  // inside its window (Ruling 8), phaseAt then says 'period', and the day is
+  // still flagged. Hiding the line there would hide a flagged day.
+  const w = phase.window;
+  if (w && w.from <= summary.asOf && summary.asOf <= w.to) parts.push(caveatParagraph(phase.caveat));
 
   if (lastPeriod === null) {
     parts.push('<p>No periods logged yet.</p>');
@@ -56,40 +87,18 @@ export function renderSummary(summary) {
   parts.push('<section class="card predictions">');
   if (adapted.available) {
     // The no-period state carries `confidence: null` from buildSummary, so
-    // there is nothing here to print even if this template changed.
-    const confidence = adapted.confidence === null
-      ? '' : ` — ${escapeHtml(adapted.confidence)}% confident`;
+    // there is nothing here to print even if this template changed. A date
+    // moved by a positive ovulation test is an observation, not a model
+    // output, so a percentage beside it would be a false precision.
+    const note = adapted.fromTest === true
+      ? ' — from your positive ovulation test'
+      : adapted.confidence === null ? '' : ` — ${escapeHtml(adapted.confidence)}% confident`;
     const label = adapted.status === 'not-expected' ? 'If one comes' : 'Next expected';
-    parts.push(line(label, `${escapeHtml(adapted.date)}${confidence}`));
+    parts.push(line(label, `${escapeHtml(adapted.date)}${note}`));
   } else {
     parts.push(line('Next expected', 'not enough data yet'));
   }
 
-  if (baseline.available) {
-    // Solid for the adapted prediction, dashed for the counterfactual — and
-    // labelled in words too, so the distinction survives colour blindness and
-    // a screen reader.
-    if (baseline.wouldHaveStarted !== null) {
-      parts.push(line(
-        'Off birth control',
-        `would have started ${escapeHtml(baseline.wouldHaveStarted)}, ${escapeHtml(days(baseline.daysAgo))} ago`,
-        'counterfactual',
-      ));
-    } else {
-      parts.push(line(
-        'Off birth control',
-        `would be due ${escapeHtml(baseline.date)}`,
-        'counterfactual',
-      ));
-    }
-  }
-
-  if (divergence.meanShift !== null) {
-    parts.push(line(
-      'Shift',
-      `${escapeHtml(signed(divergence.meanShift))} days compared with the natural cycle`,
-    ));
-  }
   parts.push('</section>');
 
   return parts.join('');
@@ -112,7 +121,10 @@ function cellLabel(cell) {
   if (cell.spotting) parts.push(`spotting: ${cell.spotting}`);
   if (cell.pms) parts.push('PMS');
   if (cell.predicted) parts.push('period expected');
-  if (cell.baseline) parts.push('would have started without birth control');
+  if (cell.isFertile) parts.push('fertile window, predicted');
+  if (cell.isDescent) parts.push('egg expected to descend');
+  if (cell.fromTest) parts.push('moved here by a positive ovulation test');
+  if (cell.upcoming) parts.push('period expected later');
   return parts.join(', ');
 }
 
@@ -133,7 +145,9 @@ function cellClasses(cell) {
   if (cell.spotting) classes.push('cal-spotting');
   if (cell.testPositive) classes.push('cal-test');
   if (cell.predicted) classes.push('cal-predicted');
-  if (cell.baseline) classes.push('cal-baseline');
+  if (cell.upcoming) classes.push('cal-upcoming');
+  if (cell.isFertile) classes.push('cal-fertile');
+  if (cell.isDescent) classes.push('cal-descent');
   return classes.join(' ');
 }
 
@@ -148,7 +162,9 @@ const LEGEND = [
   ['cal-pms', 'PMS'],
   ['cal-test', 'Positive test'],
   ['cal-predicted', 'Period expected'],
-  ['cal-baseline', 'Would have been, without birth control'],
+  ['cal-upcoming', 'Period expected later'],
+  ['cal-fertile', 'Fertile window (predicted)'],
+  ['cal-fertile cal-descent', 'Egg expected to descend'],
 ];
 
 function renderLegend() {
@@ -166,7 +182,7 @@ function flowDot(cell) {
   return cell.isPeriod ? '<span class="cal-dot flow-medium"></span>' : '';
 }
 
-export function renderCalendar(grid) {
+export function renderCalendar(grid, { caveat } = {}) {
   const head = WEEKDAY_NAMES
     .map(name => `<div class="cal-weekday">${escapeHtml(name)}</div>`)
     .join('');
@@ -182,7 +198,12 @@ export function renderCalendar(grid) {
     + '</button>'
   )).join('');
 
-  return `<div class="cal-grid">${head}${cells}</div>${renderLegend()}`;
+  // Printed under the legend whenever a fertile mark is on screen, and not
+  // otherwise: the caveat belongs to the mark. It is printed as given.
+  const marked = grid.weeks.flat().some(cell => cell.isFertile);
+  const note = marked ? caveatParagraph(caveat) : '';
+
+  return `<div class="cal-grid">${head}${cells}</div>${renderLegend()}${note}`;
 }
 
 // The panel under the calendar: what this day was, where it sits in the
@@ -204,8 +225,15 @@ export function renderDay(detail, { canEdit = true } = {}) {
 
   if (detail.isFuture) parts.push(line('', 'Still to come'));
   if (detail.predicted) parts.push(line('', 'Period expected on this day'));
-  if (detail.baseline) {
-    parts.push(line('', 'Where a period would have fallen without birth control'));
+  if (detail.upcoming) parts.push(line('', 'Period expected later'));
+  if (detail.isFertile) {
+    parts.push(line('', 'Fertile window — predicted'));
+    if (detail.isDescent) parts.push(line('', 'Egg expected to descend on this day'));
+    if (detail.fromTest) {
+      const on = detail.testedLabel ? ` on ${escapeHtml(detail.testedLabel)}` : '';
+      parts.push(line('', `This window was moved by a positive ovulation test${on}`));
+    }
+    parts.push(caveatParagraph(detail.caveat));
   }
   if (detail.method !== null) {
     parts.push(line('Method', `${escapeHtml(detail.method.method)} since ${escapeHtml(detail.method.startedOn)}`));

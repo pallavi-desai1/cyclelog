@@ -38,7 +38,7 @@ function loggedItems(entry) {
 }
 
 export function dayDetail(doc, dateISO, {
-  todayISO, adaptedDate = null, baselineDates = [],
+  todayISO, adaptedDate = null, upcomingDates = [], windows = [],
 }) {
   const entry = (doc.days ?? {})[dateISO] ?? null;
   const span = spanCovering(doc, dateISO);
@@ -46,6 +46,7 @@ export function dayDetail(doc, dateISO, {
   // last one logged, which is exactly what "day 23" means when she is waiting.
   const cycleStart = lastPeriodStartOnOrBefore(doc, dateISO);
   const episode = currentEpisode(doc, dateISO);
+  const window = windows.find(w => w.from <= dateISO && dateISO <= w.to) ?? null;
 
   return {
     date: dateISO,
@@ -73,6 +74,18 @@ export function dayDetail(doc, dateISO, {
       : { method: episode.method, startedOn: episode.startedOn },
 
     predicted: adaptedDate !== null && dateISO === adaptedDate,
-    baseline: baselineDates.includes(dateISO),
+    // Same clip as the grid: the next period keeps its solid mark alone.
+    upcoming: upcomingDates.includes(dateISO)
+      && (adaptedDate === null || dateISO > adaptedDate),
+    isFertile: window !== null,
+    // Descent and fromTest exist only inside a window, as on the grid.
+    isDescent: window !== null && window.descent === dateISO,
+    // Every day of a moved window, not just the descent day: the window as a
+    // whole was moved. `testedLabel` says by which test, so the panel can word
+    // it as a fact about the window rather than about "here".
+    fromTest: window !== null && window.fromTest === true,
+    testedLabel: window !== null && window.fromTest === true && typeof window.testedOn === 'string'
+      ? dayLabel(window.testedOn)
+      : null,
   };
 }

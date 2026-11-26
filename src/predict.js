@@ -1,8 +1,9 @@
 import { addDays, diffDays } from './dates.js';
 import { cycleWeight, weightedMedian, weightedSd, effectiveN } from './weighted.js';
 import { confidencePercent } from './confidence.js';
-import { baselineCycles, episodeCycles, currentEpisode, sigmaForEffect } from './episodes.js';
+import { baselineCycles, naturalCycles, episodeCycles, currentEpisode, sigmaForEffect } from './episodes.js';
 import { describeLengths } from './stats.js';
+import { movedNextStart } from './phase.js';
 
 // How fast the adapted model trusts the current episode over the baseline.
 // w = n/(n+TAU): half credit at three episode cycles, 80% at twelve.
@@ -32,6 +33,7 @@ const unavailable = (model, reason) => ({
   status: null,
   daysLate: null,
   reason,
+  fromTest: false,
 });
 
 export function lastPeriodStart(doc) {
@@ -153,11 +155,87 @@ export function baselineModel(cycles, doc, todayISO) {
     status: counterfactual.status === 'late' ? 'passed' : counterfactual.status,
     daysLate: counterfactual.daysLate,
     reason: null,
+    fromTest: false,
   };
 }
 
+// The forward prediction's prior: every cycle no hormonal episode touched,
+// anchored on the most recent logged period. Unlike `baselineModel` it does not
+// freeze at the first episode, so natural cycles logged since keep counting.
+// Same guards as `baselineModel`, for the same reasons.
+export function naturalModel(cycles, doc, todayISO) {
+  const sample = naturalCycles(cycles, doc);
+  if (sample.length < 2) {
+    return unavailable('natural', `needs at least 2 natural cycles, has ${sample.length}`);
+  }
+
+  const weights = sample.map(cycle => cycleWeight(cycle, todayISO));
+  const lengths = sample.map(cycle => cycle.length);
+  const nEff = effectiveN(lengths, weights);
+  const length = weightedMedian(lengths, weights);
+
+  if (length === null || !(nEff > 0)) {
+    return unavailable('natural', 'every natural cycle is too old to carry weight');
+  }
+
+  const sigma = weightedSd(lengths, weights) ?? 0;
+
+  const anchor = lastPeriodStart(doc);
+  if (anchor === null) {
+    return unavailable('natural', 'no logged period start to project from');
+  }
+
+  const date = projectForward(anchor, length, todayISO);
+  if (date === null) {
+    return unavailable('natural', 'projection exceeded the step cap without reaching today');
+  }
+
+  const previousDate = projectPrevious(anchor, length, todayISO);
+  const { status, daysLate } = predictionStatus(firstProjection(anchor, length), todayISO, false);
+
+  return {
+    available: true,
+    model: 'natural',
+    date,
+    length,
+    sigma,
+    confidence: confidencePercent(sigma, nEff),
+    nEff,
+    anchor,
+    weight: null,
+    previousDate,
+    status,
+    daysLate,
+    reason: null,
+    fromTest: false,
+  };
+}
+
+// A positive ovulation test outside the predicted window moves the period date
+// (see movedNextStart). The confidence percentage is withheld then: it describes
+// the statistical model, and once a logged observation has displaced that
+// model's date the number no longer describes what is on screen. Withheld here,
+// in the data, as buildSummary does for 'not-expected', so no renderer can
+// print it by accident. Status is recomputed against the moved date.
+//
+// A moved date can land before today (an old test): it is returned as is, with
+// status late, because it is the observation-derived date, not a projection.
+//
+// `suppressing` follows TODAY's method, not the method at the test. The gate in
+// movedNextStart is evaluated at the descent day; this flag at today, so the two
+// can disagree: a test logged before a suppressing method began still moves the
+// date (a period was genuinely due about then, and a method begun mid-luteal
+// does not usually prevent that bleed), but once that method is in force a long
+// overdue period reads 'not-expected', not 'late'.
+function withTestMove(model, doc, todayISO, suppressing) {
+  const moved = movedNextStart(doc, model.anchor, firstProjection(model.anchor, model.length));
+  if (moved === null) return { ...model, fromTest: false };
+  const { status, daysLate } = predictionStatus(moved, todayISO, suppressing);
+  return { ...model, date: moved, confidence: null, status, daysLate, fromTest: true };
+}
+
 export function adaptedModel(cycles, doc, todayISO) {
-  const base = baselineModel(cycles, doc, todayISO);
+  const base = naturalModel(cycles, doc, todayISO);
   const episode = currentEpisode(doc, todayISO);
   const anchor = lastPeriodStart(doc) ?? base.anchor;
 
@@ -176,7 +254,7 @@ export function adaptedModel(cycles, doc, todayISO) {
     // Counted from the due date so it keeps running; off birth control a period
     // overdue is simply late, and absence is never the expectation.
     const neStatus = predictionStatus(firstProjection(anchor, base.length), todayISO, false);
-    return {
+    return withTestMove({
       ...base,
       model: 'no-episode',
       anchor,
@@ -185,7 +263,7 @@ export function adaptedModel(cycles, doc, todayISO) {
       previousDate: nePrevious,
       status: neStatus.status,
       daysLate: neStatus.daysLate,
-    };
+    }, doc, todayISO, false);
   }
 
   const sample = episodeCycles(cycles, doc, todayISO);
@@ -262,7 +340,7 @@ export function adaptedModel(cycles, doc, todayISO) {
     firstProjection(anchor, length), todayISO, suppressing,
   );
 
-  return {
+  return withTestMove({
     available: true,
     model: 'adapted',
     date: adaptedDate,
@@ -276,7 +354,7 @@ export function adaptedModel(cycles, doc, todayISO) {
     status,
     daysLate,
     reason: null,
-  };
+  }, doc, todayISO, suppressing);
 }
 
 export function predict(cycles, doc, todayISO) {

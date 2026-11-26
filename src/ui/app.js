@@ -20,6 +20,7 @@ import {
   monthGrid, monthOf, shiftMonth, monthLabel, projectedDates, monthRange, clampMonth,
 } from '../calendar.js';
 import { dayDetail } from '../day.js';
+import { cycleWindows, nextStartForDoc } from '../phase.js';
 import {
   renderSummary, renderCalendar, renderDay, renderMonthPicker,
 } from './render.js';
@@ -622,21 +623,40 @@ async function importMore(files) {
   }
 }
 
-// Where a period would have fallen in THIS month, not merely the next one
-// — the comparison she asked for only works if the ghost keeps its cadence
-// across every month she looks at. A window slightly wider than the grid
-// covers the padding days at either end.
-function ghostDatesFor(month) {
-  if (!openSummary.baseline.available) return [];
-  // No `?? baseline.date` fallback: projecting from the next ghost instead of
-  // the anchor silently drops every month before it, which is most of the
-  // comparison. A missing anchor means no cadence, not a different one.
+// Dates a period is projected to start in THIS month's grid, from the
+// anchor, so the cadence holds across every month she looks at. A window
+// slightly wider than the grid covers the padding days at either end.
+// Clipped to dates strictly after the next predicted period: the cadence runs
+// backward through the anchor's own multiples, and unclipped it would stamp
+// "Period expected later" onto past months where her real periods already sit.
+// No `?? date` fallback: a missing anchor means no cadence, not a different one.
+// When a positive test moved the prediction (Ruling 6) the moved date is the
+// origin: it replaces that cycle's next start everywhere, including the anchor
+// the dashed projections run from. Projecting from the logged anchor instead
+// would draw a second, contradictory "Period expected later" a week away.
+function upcomingDatesFor(summary, month) {
+  const next = summary.adapted.date;
+  if (next === null) return [];
   return projectedDates(
-    openSummary.baseline.anchor,
-    openSummary.baseline.length,
+    summary.adapted.fromTest ? next : summary.adapted.anchor,
+    summary.adapted.length,
     addDays(`${month}-01`, -10),
     addDays(`${month}-01`, 45),
-  );
+  ).filter(date => date > next);
+}
+
+// The fertile windows overlapping this month's grid. The next-start rule
+// (the current cycle's is PINNED) lives in nextStartForDoc and nowhere else.
+function windowsFor(doc, summary, month) {
+  const nextStartFor = nextStartForDoc(doc, {
+    anchor: summary.adapted.anchor,
+    length: summary.adapted.length,
+  });
+  return cycleWindows(doc, {
+    nextStartFor,
+    fromISO: addDays(`${month}-01`, -10),
+    toISO: addDays(`${month}-01`, 45),
+  });
 }
 
 function drawCalendar() {
@@ -645,10 +665,11 @@ function drawCalendar() {
     month: viewMonth,
     todayISO: localToday(),
     adaptedDate: openSummary.adapted.date,
-    baselineDates: ghostDatesFor(viewMonth),
+    upcomingDates: upcomingDatesFor(openSummary, viewMonth),
+    windows: windowsFor(openDoc, openSummary, viewMonth),
   });
   say('cal-label', grid.label);
-  el('calendar').innerHTML = renderCalendar(grid);
+  el('calendar').innerHTML = renderCalendar(grid, { caveat: openSummary.phase.caveat });
   markSelected();
 }
 
@@ -667,11 +688,15 @@ function selectDay(date) {
     cell.classList.remove('cal-selected');
   }
   markSelected();
-  el('day-detail').innerHTML = renderDay(dayDetail(openDoc, date, {
-    todayISO: localToday(),
-    adaptedDate: openSummary.adapted.date,
-    baselineDates: ghostDatesFor(monthOf(date)),
-  }));
+  el('day-detail').innerHTML = renderDay({
+    ...dayDetail(openDoc, date, {
+      todayISO: localToday(),
+      adaptedDate: openSummary.adapted.date,
+      upcomingDates: upcomingDatesFor(openSummary, monthOf(date)),
+      windows: windowsFor(openDoc, openSummary, monthOf(date)),
+    }),
+    caveat: openSummary.phase.caveat,
+  });
 }
 
 function openEditor(date) {
@@ -687,7 +712,8 @@ function openEditor(date) {
   el('day-detail').innerHTML = renderEditor(dayDetail(openDoc, date, {
     todayISO: localToday(),
     adaptedDate: openSummary.adapted.date,
-    baselineDates: ghostDatesFor(monthOf(date)),
+    upcomingDates: upcomingDatesFor(openSummary, monthOf(date)),
+    windows: windowsFor(openDoc, openSummary, monthOf(date)),
   }));
 }
 
@@ -1289,9 +1315,12 @@ function drawViewerCalendar() {
     month: viewerMonth,
     todayISO: localToday(),
     adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date,
-    baselineDates: [],
+    upcomingDates: viewerSummary === null ? [] : upcomingDatesFor(viewerSummary, viewerMonth),
+    windows: viewerSummary === null ? [] : windowsFor(viewerShared.doc, viewerSummary, viewerMonth),
   });
-  el('viewer-calendar').innerHTML = renderCalendar(grid);
+  el('viewer-calendar').innerHTML = renderCalendar(grid, {
+    caveat: viewerSummary === null ? null : viewerSummary.phase.caveat,
+  });
   say('viewer-label', monthLabel(viewerMonth));
   markViewerSelected();
 }
@@ -1325,14 +1354,17 @@ function drawViewerDay() {
     el('viewer-day').innerHTML = '';
     return;
   }
-  // No ghost on his screen: the viewer calendar is drawn with baselineDates
-  // empty, so a day panel claiming a counterfactual would contradict the grid
-  // beside it.
-  el('viewer-day').innerHTML = renderDay(dayDetail(viewerShared.doc, viewerDate, {
-    todayISO: localToday(),
-    adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date,
-    baselineDates: [],
-  }), { canEdit: false });
+  // His summary and his document, never hers. Same marks as the grid beside
+  // it, and the caveat rides on the detail: renderDay prints none otherwise.
+  el('viewer-day').innerHTML = renderDay({
+    ...dayDetail(viewerShared.doc, viewerDate, {
+      todayISO: localToday(),
+      adaptedDate: viewerSummary === null ? null : viewerSummary.adapted.date,
+      upcomingDates: viewerSummary === null ? [] : upcomingDatesFor(viewerSummary, monthOf(viewerDate)),
+      windows: viewerSummary === null ? [] : windowsFor(viewerShared.doc, viewerSummary, monthOf(viewerDate)),
+    }),
+    caveat: viewerSummary === null ? null : viewerSummary.phase.caveat,
+  }, { canEdit: false });
   markViewerSelected();
 }
 

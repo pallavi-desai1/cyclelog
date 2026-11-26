@@ -1,8 +1,9 @@
 import { diffDays } from './dates.js';
 
-// 18 months. Long enough that years of history still informs the model,
-// short enough that a pattern which has measurably shortened is respected.
-export const HALF_LIFE_DAYS = 548;
+// One year. Long enough that history still informs the model, short enough
+// that a pattern which has measurably changed is respected within a year
+// rather than eighteen months. The owner chose this value.
+export const HALF_LIFE_DAYS = 365;
 
 // Dates the owner herself marked "approx" in the original log count for half.
 export const APPROX_WEIGHT = 0.5;
@@ -71,6 +72,11 @@ export function weightedMedian(values, weights) {
 export function weightedSd(values, weights) {
   const p = pairs(values, weights);
   if (p.length < 2) return null;
+
+  // Identical values have no spread. Say so exactly: the weighted mean of
+  // identical values need not round-trip to that value under uneven weights,
+  // and the difference would otherwise surface as a ~1e-15 SD.
+  if (p.every(x => x.v === p[0].v)) return 0;
 
   const v1 = p.reduce((t, x) => t + x.w, 0);
   const v2 = p.reduce((t, x) => t + x.w * x.w, 0);

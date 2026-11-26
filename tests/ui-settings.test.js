@@ -95,6 +95,22 @@ describe('renderEpisodeForm', () => {
     expect(html).not.toMatch(/implant|pill|IUD/i);
   });
 
+  it('pre-selects no effect when adding, so the validator can ask her to choose', () => {
+    const select = renderEpisodeForm({ episode: null, index: null }).match(/<select id="episode-effect">(.*?)<\/select>/)[1];
+    const options = [...select.matchAll(/<option([^>]*)>/g)].map(m => m[1]);
+    expect(options[0]).toMatch(/value=""/);
+    expect(options[0]).toMatch(/disabled/);
+    expect(options[0]).toMatch(/selected/);
+    expect(options.slice(1).some(o => /selected/.test(o))).toBe(false);
+  });
+
+  it('keeps the current effect selected when editing', () => {
+    const select = renderEpisodeForm({ episode: episodes[0], index: 0 }).match(/<select id="episode-effect">(.*?)<\/select>/)[1];
+    expect(select).not.toMatch(/disabled/);
+    expect(select).toContain(`value="${episodes[0].expectedEffect}" selected`);
+    expect((select.match(/selected/g) ?? [])).toHaveLength(1);
+  });
+
   it('fills the fields when editing, and remembers which one', () => {
     const html = renderEpisodeForm({ episode: episodes[0], index: 0 });
     expect(html).toContain('value="2015-01-01"');
@@ -237,5 +253,14 @@ describe('renderEpisodeForm tells her which thing she is editing', () => {
       index: 0,
     });
     expect(html).not.toContain('<img');
+  });
+});
+
+describe('renderSwitchForm effect select', () => {
+  it('pre-selects no effect, like the add form', () => {
+    const html = renderSwitchForm({ current: null, todayISO: '2015-03-05' });
+    const select = html.match(/<select id="switch-effect">(.*?)<\/select>/)[1];
+    expect(select).toMatch(/^<option value="" disabled selected>/);
+    expect((select.match(/selected/g) ?? [])).toHaveLength(1);
   });
 });

@@ -13,8 +13,8 @@ export const MONTH_NAMES = [
 ];
 
 // How far past today the picker reaches: enough to hold the next predicted
-// period and its counterfactual, which are the only months ahead worth
-// looking at.
+// period and the one projected after it, which are the only months ahead
+// worth looking at.
 const MONTHS_AHEAD = 2;
 
 export function monthOf(iso) {
@@ -35,13 +35,13 @@ export function monthLabel(month) {
   return `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
 }
 
-// Every date the counterfactual cadence lands on inside a window. This is
-// what lets the calendar answer "when would my period have been" for any
+// Every date the projected cadence lands on inside a window. This is what
+// lets the calendar show "and then roughly every N days after that" for any
 // month, not just the next one.
 //
 // Counting starts at n = 1, one full cycle after the anchor: the anchor is a
-// period that actually happened, so marking it as a counterfactual would
-// claim a prediction where there is an observation.
+// period that actually happened, so marking it as projected would claim a
+// prediction where there is an observation.
 //
 // The offset is `round(length * n)` — multiplied first, rounded once. Adding
 // a rounded step per cycle accumulates error: at 28.4 days that is a
@@ -112,8 +112,9 @@ function periodDays(spans) {
   return marked;
 }
 
-function cellFor(date, { month, todayISO, bleeding, days, adaptedDate, ghosts }) {
+function cellFor(date, { month, todayISO, bleeding, days, adaptedDate, upcoming, fertile, descent, descentFromTest }) {
   const entry = days[date] ?? null;
+  const isFertile = fertile.has(date);
   return {
     date,
     day: Number(date.slice(8, 10)),
@@ -127,17 +128,27 @@ function cellFor(date, { month, todayISO, bleeding, days, adaptedDate, ghosts })
     // for the day panel, not something to colour a month with.
     testPositive: entry !== null && entry.tests !== undefined && entry.tests !== null
       && (entry.tests.ovulation === 'positive' || entry.tests.pregnancy === 'positive'),
-    // Two separate marks, never one: §10.3 draws the adapted prediction as a
-    // solid outline and the counterfactual as a dashed one, so they stay
+    // Two separate marks, never one: the adapted prediction is a solid
+    // outline and a later projection a dashed one, so they stay
     // distinguishable without relying on colour.
     predicted: adaptedDate !== null && date === adaptedDate,
-    baseline: ghosts.has(date),
+    // The next period has its own solid mark. A dashed one means "and then
+    // roughly every N days after that", so it never lands on or before it:
+    // monthGrid must be safe whatever it is handed, not only what the call
+    // site clips.
+    upcoming: upcoming.has(date) && (adaptedDate === null || date > adaptedDate),
+    isFertile,
+    // Structurally tied to isFertile: the descent bar is drawn as a lone
+    // indigo mark when nothing else says "fertile", and that would read as a
+    // fertile marker on a day that is not predicted fertile.
+    isDescent: isFertile && descent.has(date),
+    fromTest: isFertile && descentFromTest.has(date),
     hasEntry: entry !== null,
   };
 }
 
 export function monthGrid(doc, {
-  month, todayISO, adaptedDate = null, baselineDates = [],
+  month, todayISO, adaptedDate = null, upcomingDates = [], windows = [],
 }) {
   const year = Number(month.slice(0, 4));
   const monthNumber = Number(month.slice(5, 7));
@@ -155,8 +166,18 @@ export function monthGrid(doc, {
     bleeding: periodDays(doc.spans),
     days: doc.days ?? {},
     adaptedDate,
-    ghosts: new Set(baselineDates),
+    upcoming: new Set(upcomingDates),
+    fertile: new Set(),
+    descent: new Set(),
+    descentFromTest: new Set(),
   };
+  for (const window of windows) {
+    for (let date = window.from; date <= window.to; date = addDays(date, 1)) {
+      context.fertile.add(date);
+    }
+    context.descent.add(window.descent);
+    if (window.fromTest) context.descentFromTest.add(window.descent);
+  }
 
   const weeks = [];
   let week = [];

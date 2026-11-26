@@ -18,10 +18,16 @@ export const EFFECT_LABELS = {
 // how long it has actually been rather than nagging without information.
 export const BACKUP_STALE_DAYS = 30;
 
-const effectOptions = (selected) => EFFECTS.map((effect) => {
-  const chosen = selected === effect ? ' selected' : '';
-  return `<option value="${effect}"${chosen}>${escapeHtml(EFFECT_LABELS[effect])}</option>`;
-}).join('');
+// With nothing to select (adding), open on a disabled placeholder rather than
+// letting the browser pre-select EFFECTS[0] ('suppress'): a silent default
+// would be saved unread, and validateEpisode could never ask her to choose.
+const effectOptions = (selected) => (selected == null
+  ? '<option value="" disabled selected>Choose one</option>'
+  : '')
+  + EFFECTS.map((effect) => {
+    const chosen = selected === effect ? ' selected' : '';
+    return `<option value="${effect}"${chosen}>${escapeHtml(EFFECT_LABELS[effect])}</option>`;
+  }).join('');
 
 export function renderEpisodes(birthControl) {
   const episodes = birthControl ?? [];

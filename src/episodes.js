@@ -1,4 +1,4 @@
-import { episodeAt } from './cycles.js';
+import { episodeAt, isNoMethod } from './cycles.js';
 
 // Irregularity priors by what the method is expected to do to the cycle.
 export const SIGMA_BY_EFFECT = { suppress: 7, regulate: 3, none: 0 };
@@ -13,7 +13,7 @@ export function sigmaForEffect(effect) {
 }
 
 export function sortedEpisodes(doc) {
-  return [...(doc.birthControl ?? [])].sort((a, b) => a.startedOn.localeCompare(b.startedOn));
+  return (doc.birthControl ?? []).filter(episode => !isNoMethod(episode)).sort((a, b) => a.startedOn.localeCompare(b.startedOn));
 }
 
 export function firstEpisode(doc) {
@@ -47,6 +47,39 @@ export function baselineCycles(cycles, doc) {
   return usable.filter(cycle => cycle.start < first.startedOn
     && typeof cycle.nextStart === 'string'
     && cycle.nextStart <= first.startedOn);
+}
+
+// The sample the forward prediction learns from: every usable cycle that no
+// hormonal method touched at any point. Unlike `baselineCycles` it is not frozen
+// at a boundary, so natural cycles she has from now on keep counting.
+//
+// The WHOLE cycle must be clear of a hormonal method, not merely its start.
+// `buildCycles` resolves a cycle's governing episode at its start, so a cycle
+// that began off birth control and ended at the first period after a method went
+// in would look natural while its length was produced entirely by the method.
+// This is the same bug found and fixed in `baselineCycles` (see its comment), so
+// the test is interval intersection: [startedOn, endedOn ?? infinity] against
+// [cycle.start, cycle.nextStart - 1].
+//
+// The upper bound is exclusive of nextStart because nextStart is the first day
+// of the NEXT cycle: a method starting the day a period begins cannot have
+// influenced the cycle that period ended. The lower bound stays closed, so an
+// episode whose inclusive endedOn falls on cycle.start still drops the cycle
+// (hormones linger; excluding is the conservative direction). For a single
+// open-ended episode this reduces to cycle.nextStart <= first.startedOn, which
+// is exactly baselineCycles' second condition, so the two samples agree on the
+// boundary.
+//
+// Hormonal means not "no method" and an effect other than 'none'. An unknown or
+// missing effect counts as hormonal, the same fail-safe as `sigmaForEffect`.
+export function naturalCycles(cycles, doc) {
+  const hormonal = (doc?.birthControl ?? []).filter(
+    episode => !isNoMethod(episode) && episode.expectedEffect !== 'none',
+  );
+  return usableCycles(cycles).filter(cycle => !hormonal.some(
+    episode => episode.startedOn < cycle.nextStart
+      && (episode.endedOn == null || episode.endedOn >= cycle.start),
+  ));
 }
 
 // The last logged period start at or before `iso`. A period that begins on the
