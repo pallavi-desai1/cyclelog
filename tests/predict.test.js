@@ -715,6 +715,23 @@ describe('naturalModel, discriminating cases', () => {
   });
 });
 
+describe('naturalModel measures lateness from the due date', () => {
+  // adaptedModel overwrites status and daysLate on every available path, so this
+  // is the only assertion on naturalModel's own. Anchor 2015-02-26, length 28:
+  // due 2015-03-26, then 04-23, then 05-21. On 2015-05-20 the period is 55 days
+  // past its FIRST due date (5 left in March + 30 in April + 20 in May). Measured
+  // from the most recent passed projection (04-23) it would read 27, sawtoothing
+  // back at each cycle boundary.
+  it('counts days late from the first projection, not the latest passed one', () => {
+    const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }] };
+    const m = naturalModel(buildCycles(d), d, '2015-05-20');
+    expect(m.anchor).toBe('2015-02-26');
+    expect(m.previousDate).toBe('2015-04-23');
+    expect(m.daysLate).toBe(55);
+    expect(m.status).toBe('late');
+  });
+});
+
 describe('adaptedModel takes naturalModel as its prior', () => {
   it('learns from natural cycles logged after a method ended', () => {
     const d = {

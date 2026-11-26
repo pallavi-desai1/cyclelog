@@ -165,6 +165,7 @@ export function baselineModel(cycles, doc, todayISO) {
   // The anchor is the last pre-birth-control period start, which is the start
   // of the cycle following the last baseline cycle. `buildCycles` always
   // populates `nextStart`, so this is present for any cycle it produced.
+  // Never fall back to `last.start`: see the missing-anchor note in buildModel.
   const anchor = sample.length > 0 ? (sample[sample.length - 1].nextStart ?? null) : null;
 
   return buildModel(sample, {
