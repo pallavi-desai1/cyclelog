@@ -75,6 +75,16 @@ describe('firstPositiveTest', () => {
     expect(firstPositiveTest({}, '2015-03-01', '2015-03-29')).toBeNull();
     expect(firstPositiveTest({ days: undefined }, '2015-03-01', '2015-03-29')).toBeNull();
   });
+
+  it('tolerates day entries with no tests key, or tests: null (most logged days)', () => {
+    const bare = { days: { '2015-03-02': { flow: 'light' } } };
+    expect(firstPositiveTest(bare, '2015-03-01', '2015-03-29')).toBeNull();
+    const nulled = { days: { '2015-03-02': { tests: null }, '2015-03-03': null } };
+    expect(firstPositiveTest(nulled, '2015-03-01', '2015-03-29')).toBeNull();
+    // ...and still finds a positive beside them.
+    const mixed = { days: { '2015-03-02': { flow: 'light' }, '2015-03-09': { tests: { ovulation: 'positive' } } } };
+    expect(firstPositiveTest(mixed, '2015-03-01', '2015-03-29')).toBe('2015-03-09');
+  });
 });
 
 describe('applyTestOverride', () => {
