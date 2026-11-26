@@ -2,6 +2,7 @@
 // Must never import predict.js (predict.js imports this module).
 import { addDays } from './dates.js';
 import { lastPeriodStartOnOrBefore } from './episodes.js';
+import { isNoMethod } from './cycles.js';
 
 // Luteal phase is the steadier half of the cycle, so ovulation is counted
 // back from the next period rather than forward from the last one.
@@ -99,6 +100,10 @@ function governs(e, incumbent) {
 function governingEffect(doc, iso) {
   let latest = null;
   for (const e of doc?.birthControl ?? []) {
+    // A row recorded as "nothing" is no episode at all (design §7.4), whatever
+    // effect it carries. isNoMethod is false for method: undefined, so the
+    // partner's scope-stripped copy still suppresses off expectedEffect alone.
+    if (isNoMethod(e)) continue;
     if (e.startedOn > iso || (!isOpenEpisode(e) && e.endedOn < iso)) continue;
     if (latest === null || governs(e, latest)) latest = e;
   }

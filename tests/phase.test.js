@@ -185,6 +185,27 @@ describe('cycleWindows suppression', () => {
     expect(cycleWindows(doc, range)).toEqual([]);
   });
 
+  it('treats a row recorded as "nothing" as no episode at all, whatever effect it carries', () => {
+    // The add form used to pre-select the first effect, so this is the likely save.
+    const doc = withEpisode({ method: 'nothing', startedOn: '2015-03-10', endedOn: null, expectedEffect: 'suppress' });
+    expect(cycleWindows(doc, range).map(w => w.descent)).toEqual(['2015-03-15']);
+    expect(movedNextStart(doc, '2015-03-01', '2015-03-29')).toBeNull();
+  });
+
+  it('lets a real method govern where a later "nothing" row overlaps it', () => {
+    const doc = { spans, birthControl: [
+      { method: 'implant', startedOn: '2015-03-01', endedOn: null, expectedEffect: 'suppress' },
+      { method: 'nothing', startedOn: '2015-03-10', endedOn: null, expectedEffect: 'none' },
+    ] };
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+
+  it('still suppresses on his phone, where the method name is absent but not a no-method name', () => {
+    // Ruling 1b: method undefined must not be read as "nothing".
+    const doc = withEpisode({ method: undefined, startedOn: '2015-03-10', endedOn: null, expectedEffect: 'suppress' });
+    expect(cycleWindows(doc, range)).toEqual([]);
+  });
+
   it('shows the window whole or not at all across a method boundary', () => {
     // The method starts the day after descent, so the descent day is free and
     // the whole six days are drawn rather than the four before the boundary.
