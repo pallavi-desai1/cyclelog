@@ -123,8 +123,23 @@ describe('the summary card', () => {
       }
     });
 
+    it('prints the caveat on a day that is both fertile and bleeding, where the phase reads period', () => {
+      // Ruling 8: a short cycle can bleed inside its window; phaseAt then says
+      // 'period', but the day is still flagged and must carry the line.
+      const window = { from: '2015-04-18', descent: '2015-04-22', to: '2015-04-23' };
+      const html = withPhase({ name: 'period', cycleDay: 2, window, fromTest: false, caveat });
+      expect(html).toContain('FIXED COPY');
+      expect(html).toContain('UNCERTAIN COPY');
+    });
+
+    it('prints no caveat when the window is elsewhere, or there is none', () => {
+      const away = { from: '2015-05-10', descent: '2015-05-14', to: '2015-05-15' };
+      expect(withPhase({ name: 'luteal', cycleDay: 19, window: away, fromTest: false, caveat })).not.toContain('FIXED COPY');
+      expect(withPhase({ name: 'period', cycleDay: 2, window: null, fromTest: false, caveat })).not.toContain('FIXED COPY');
+    });
+
     it('prints the caveat beside a fertile phase, and not beside a luteal one', () => {
-      const fertile = withPhase({ name: 'fertile', cycleDay: 12, window: null, fromTest: false, caveat });
+      const fertile = withPhase({ name: 'fertile', cycleDay: 12, window: { from: '2015-04-18', descent: '2015-04-22', to: '2015-04-23' }, fromTest: false, caveat });
       expect(fertile).toContain('FIXED COPY');
       expect(fertile).toContain('UNCERTAIN COPY');
       expect(fertile).toMatch(/predicted/i);
@@ -531,11 +546,17 @@ describe('calendar colour coding', () => {
       expect(html).toMatch(/class="[^"]*cal-fertile[^"]*cal-descent[^"]*" data-date="2015-03-15"|class="[^"]*cal-descent[^"]*" data-date="2015-03-15"/);
     });
 
-    it('never puts the descent class on a cell that is not fertile', () => {
-      const html = renderCalendar(grid({}, { windows }));
+    it('never puts the descent class on a cell that is not fertile, even when handed an inconsistent window', () => {
+      // Descent 03-20 lies outside 03-11 to 03-16. A consistent window cannot
+      // tell the guard from its absence; this one reddens if `isFertile &&`
+      // is dropped from calendar.js.
+      const odd = [{ from: '2015-03-11', descent: '2015-03-20', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: false }];
+      const html = renderCalendar(grid({}, { windows: odd }));
+      expect(html).toMatch(/cal-fertile/);
       for (const [, classes] of html.matchAll(/<button type="button" class="([^"]*)"/g)) {
         if (classes.includes('cal-descent')) expect(classes).toContain('cal-fertile');
       }
+      expect(html).not.toMatch(/<button type="button" class="[^"]*cal-descent[^"]*" data-date="2015-03-20"/);
     });
 
     it('names every new mark in the cell’s aria-label', () => {
@@ -575,9 +596,12 @@ describe('calendar colour coding', () => {
       expect(html).not.toContain('UNCERTAIN COPY');
     });
 
-    it('never renders anything suggesting the unmarked days are safe', () => {
+    // Scope: the renderer's OWN words (legend, aria-labels, headings), with the
+    // caveat deliberately a placeholder. The caveat copy she actually reads is
+    // pinned in tests/summary.test.js ('the caveat copy she will actually read').
+    it('adds no reassuring wording of its own around the marks', () => {
       const html = renderCalendar(grid({}, { windows }), { caveat: { fixed: 'f', uncertainty: null } });
-      expect(html).not.toMatch(/safe day|not fertile|infertile/i);
+      expect(html).not.toMatch(/safe to|safe window|safe day|no risk|low risk|can'?t get pregnant|cannot get pregnant|infertile|not fertile|unprotected/i);
     });
   });
 

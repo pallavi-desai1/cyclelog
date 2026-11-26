@@ -579,6 +579,27 @@ function ruleOf(selector) {
   return new RegExp(`(?:^|[}\\s,])${escaped}\\s*\\{([^}]*)\\}`).exec(cssRules())?.[1] ?? '';
 }
 
+describe('the day cell is the positioning context for its marks', () => {
+  // The descent bar and the positive-test pip are position: absolute. Without
+  // a positioned ancestor they escape to the page and land at its corner.
+  it('keeps .cal-cell position: relative', () => {
+    expect(ruleOf('.cal-cell')).toMatch(/position:\s*relative/);
+  });
+});
+
+describe('the descent legend swatch', () => {
+  // On a 14px swatch the cell's 6px side insets left a bar about 2px wide, a
+  // nub that did not read as the bar it explains.
+  it('gives its bar room to be a bar, not the cell geometry', () => {
+    const rule = ruleOf('.cal-swatch.cal-descent::before');
+    expect(rule, 'swatch-specific rule').not.toBe('');
+    const px = name => Number(rule.match(new RegExp(`${name}:\\s*(\\d+)px`))?.[1] ?? NaN);
+    // The swatch's padding box is 10px wide (14px less 2px borders).
+    expect(10 - px('left') - px('right')).toBeGreaterThanOrEqual(8);
+    expect(px('height')).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe('the fertile window and the descent day', () => {
   // The owner is using a predicted fertile window to avoid pregnancy. An
   // unmarked day means "not predicted fertile", never "safe", so nothing here

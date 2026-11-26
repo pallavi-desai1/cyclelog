@@ -308,7 +308,7 @@ input { font-family: var(--font-body); }
 
 .cal-predicted { border: 2px solid var(--interactive); }
 
-/* The day the temperature is predicted to fall: a bar inside the top edge.
+/* The day the egg is expected to descend: a bar inside the top edge.
    A pseudo-element, not border-top: .cal-predicted draws its ring as a
    border, and a border-top here would replace that ring's top edge. Drawn
    this way it composes with a flow fill, a spotting ring, a PMS underline and
@@ -327,6 +327,15 @@ input { font-family: var(--font-body); }
   border-radius: 3px;
   background: var(--fertile);
   box-shadow: 0 0 0 1px var(--fertile-ink);
+}
+
+/* The legend swatch is 14px, so the cell's 6px side insets would leave a bar
+   about 2px wide: a nub that does not read as the bar it explains. */
+.cal-swatch.cal-descent::before {
+  top: 2px;
+  left: 1px;
+  right: 1px;
+  height: 5px;
 }
 
 .cal-descent.cal-fertile:not(.cal-period)::before {

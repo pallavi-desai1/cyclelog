@@ -525,19 +525,32 @@ describe('the caveat copy she will actually read', () => {
     buildSummary(doc(SUPPRESS), '2015-07-15').phase.caveat.fixed,
     uncertaintyCaveat({ available: true, sigma: 5, nEff: 10 }),
     uncertaintyCaveat({ available: true, sigma: 0, nEff: 2 }),
+    uncertaintyCaveat({ available: true, sigma: 0, nEff: 20 }, true),
   ];
 
-  it('has all three strings to check', () => {
+  it('has all four strings to check', () => {
     for (const text of real) expect(text).toMatch(/\S/);
-    expect(new Set(real).size).toBe(3);
+    expect(new Set(real).size).toBe(4);
   });
 
-  // The fixed copy says "is not a safe day" to deny it, so the phrase is
-  // allowed only in that negated form.
-  it('never says an unmarked day is safe, or that a day is not fertile or infertile', () => {
-    for (const text of real) {
-      expect(text.replace(/not a safe day/gi, '')).not.toMatch(/safe day/i);
-      expect(text).not.toMatch(/not fertile|infertile/i);
+  // This is the only place the guarantee about the words she reads can be
+  // made. The fixed copy says "is not a safe day" to deny it, so a negation
+  // directly before "safe day" is allowed and nothing else is.
+  const BANNED = /safe to|safe window|safe day|safe days|no risk|low risk|can'?t get pregnant|cannot get pregnant|infertile|not fertile|unprotected/i;
+  const NEGATED_SAFE_DAY = /\b(not|isn'?t|never)\b[^.]{0,20}safe day/gi;
+
+  it('never says or implies that an unmarked day is safe', () => {
+    for (const text of real) expect(text.replace(NEGATED_SAFE_DAY, '')).not.toMatch(BANNED);
+  });
+
+  it('the ban would catch the phrasings it exists for', () => {
+    for (const bad of ['This is a safe day.', 'There is no risk on the other days.',
+      'Low risk outside the window.', 'You cannot get pregnant now.', 'An infertile phase.',
+      'Safe to skip protection.', 'This day is not a safe day, but the next is a safe day.']) {
+      expect(bad.replace(NEGATED_SAFE_DAY, ''), bad).toMatch(BANNED);
+    }
+    for (const fine of ['a day without a mark is not a safe day', "this isn't a safe day", 'never a safe day']) {
+      expect(fine.replace(NEGATED_SAFE_DAY, ''), fine).not.toMatch(BANNED);
     }
   });
 });

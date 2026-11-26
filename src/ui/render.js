@@ -51,10 +51,14 @@ export function renderSummary(summary) {
   if (phaseName !== null) {
     const day = Number.isFinite(phase.cycleDay) ? `, Day ${escapeHtml(phase.cycleDay)}` : '';
     parts.push(line('Phase', `${escapeHtml(phaseName)}${day}`, 'phase'));
-    // The caveats are built in buildSummary and printed as given. The
-    // fertile phase is the one this screen names as a fertile claim.
-    if (phase.name === 'fertile') parts.push(caveatParagraph(phase.caveat));
   }
+
+  // The caveats are built in buildSummary and printed as given. Gated on the
+  // window covering today, not on the phase name: a short cycle can bleed
+  // inside its window (Ruling 8), phaseAt then says 'period', and the day is
+  // still flagged. Hiding the line there would hide a flagged day.
+  const w = phase.window;
+  if (w && w.from <= summary.asOf && summary.asOf <= w.to) parts.push(caveatParagraph(phase.caveat));
 
   if (lastPeriod === null) {
     parts.push('<p>No periods logged yet.</p>');
