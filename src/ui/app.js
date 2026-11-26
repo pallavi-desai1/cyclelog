@@ -630,11 +630,15 @@ async function importMore(files) {
 // backward through the anchor's own multiples, and unclipped it would stamp
 // "Period expected later" onto past months where her real periods already sit.
 // No `?? date` fallback: a missing anchor means no cadence, not a different one.
+// When a positive test moved the prediction (Ruling 6) the moved date is the
+// origin: it replaces that cycle's next start everywhere, including the anchor
+// the dashed projections run from. Projecting from the logged anchor instead
+// would draw a second, contradictory "Period expected later" a week away.
 function upcomingDatesFor(summary, month) {
   const next = summary.adapted.date;
   if (next === null) return [];
   return projectedDates(
-    summary.adapted.anchor,
+    summary.adapted.fromTest ? next : summary.adapted.anchor,
     summary.adapted.length,
     addDays(`${month}-01`, -10),
     addDays(`${month}-01`, 45),

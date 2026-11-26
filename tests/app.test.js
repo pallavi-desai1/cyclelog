@@ -492,6 +492,27 @@ describe('phases and ovulation across every month', () => {
     expect(upcomingDatesFor({ adapted: { anchor: null, length: null, date: null } }, '2016-03')).toEqual([]);
   });
 
+  it('projects from the moved date when a test moved the prediction, so one date is drawn (Ruling 6)', async () => {
+    const { projectedDates } = await import('../src/calendar.js');
+    const { addDays } = await import('../src/dates.js');
+    const text = app();
+    const start = text.indexOf('function upcomingDatesFor(');
+    const end = text.indexOf('\n}\n', start) + 2;
+    const upcomingDatesFor = new Function('projectedDates', 'addDays',
+      `${text.slice(start, end)}\nreturn upcomingDatesFor;`)(projectedDates, addDays);
+    // Anchor 2015-02-26, 28-day cycles: arithmetic next is 2015-03-26. A positive
+    // test on 03-05 (outside the window) moves the prediction to 03-05 + 14 = 03-19.
+    const moved = { adapted: { anchor: '2015-02-26', length: 28, date: '2015-03-19', fromTest: true } };
+    // From the moved date the cadence runs 04-16, 05-14. From the anchor it would
+    // draw 03-26 and 04-23: a second, contradictory mark a week after the solid one.
+    expect(upcomingDatesFor(moved, '2015-03')).toEqual([]);
+    expect(upcomingDatesFor(moved, '2015-04')).toEqual(['2015-04-16', '2015-05-14']);
+    // Not moved: unchanged, from the anchor.
+    const plain = { adapted: { anchor: '2015-02-26', length: 28, date: '2015-03-26', fromTest: false } };
+    expect(upcomingDatesFor(plain, '2015-03')).toEqual([]);
+    expect(upcomingDatesFor(plain, '2015-04')).toContain('2015-04-23');
+  });
+
   it('builds the windows through the one shared builder', () => {
     const body = functionBody(app(), 'windowsFor');
     expect(body, 'windowsFor').not.toBeNull();
