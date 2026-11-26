@@ -94,10 +94,18 @@ export function predictionStatus(previousDate, todayISO, suppressing) {
   return { status: suppressing ? 'not-expected' : 'late', daysLate };
 }
 
-export function baselineModel(cycles, doc, todayISO) {
-  const sample = baselineCycles(cycles, doc);
+// The computation `baselineModel` and `naturalModel` share, with all four of
+// their guards. They differ only in what they are told here: the sample, the
+// anchor, the model name, the unavailable reasons, and `status` -- how the
+// status is derived and labelled from the projection. Keeping the guards in one
+// place is the point: a fix to one model's guard reaches the other.
+//
+// `reasons` names the sample in its own words: `fewCycles`, `tooOld`, `noAnchor`
+// (the step-cap reason is the same for both and lives here).
+// `status(anchor, length, previousDate)` returns `{ status, daysLate }`.
+function buildModel(sample, { model, anchor, todayISO, reasons, status }) {
   if (sample.length < 2) {
-    return unavailable('baseline', `needs at least 2 usable pre-birth-control cycles, has ${sample.length}`);
+    return unavailable(model, reasons.fewCycles(sample.length));
   }
 
   const weights = sample.map(cycle => cycleWeight(cycle, todayISO));
@@ -106,7 +114,7 @@ export function baselineModel(cycles, doc, todayISO) {
   const length = weightedMedian(lengths, weights);
 
   if (length === null || !(nEff > 0)) {
-    return unavailable('baseline', 'every cycle is too old to carry weight');
+    return unavailable(model, reasons.tooOld);
   }
 
   // A weighted SD needs two effectively-weighted observations; when it cannot
@@ -114,16 +122,12 @@ export function baselineModel(cycles, doc, todayISO) {
   // confidence term treats that as certainty within the window.
   const sigma = weightedSd(lengths, weights) ?? 0;
 
-  // The anchor is the last pre-birth-control period start, which is the start
-  // of the cycle following the last baseline cycle. `buildCycles` always
-  // populates `nextStart`, so this is present for any cycle it produced -- but
-  // falling back to `last.start` would move the anchor a full cycle early and
-  // report a counterfactual wrong by ~28 days with nothing to signal it. A
-  // missing anchor is a missing prediction, not a different one.
-  const last = sample[sample.length - 1];
-  const anchor = last.nextStart ?? null;
+  // A missing anchor is a missing prediction, not a different one. Callers must
+  // not substitute a fallback anchor: for the baseline, falling back to
+  // `last.start` would move the anchor a full cycle early and report a
+  // counterfactual wrong by ~28 days with nothing to signal it.
   if (anchor === null) {
-    return unavailable('baseline', 'the last pre-birth-control cycle has no following period start');
+    return unavailable(model, reasons.noAnchor);
   }
 
   // `available: true` with a `date` of `null` would be representable
@@ -131,19 +135,15 @@ export function baselineModel(cycles, doc, todayISO) {
   // "has a usable date", so that case is reported as unavailable instead.
   const date = projectForward(anchor, length, todayISO);
   if (date === null) {
-    return unavailable('baseline', 'projection exceeded the step cap without reaching today');
+    return unavailable(model, 'projection exceeded the step cap without reaching today');
   }
 
-  // `suppressing` is always false here: nothing hypothetical can be "not
-  // expected". A counterfactual cycle can only be upcoming or already passed,
-  // so `late` is relabelled — calling the ghost "late" would imply the owner is
-  // late when the statement is about a cycle that was never going to happen.
   const previousDate = projectPrevious(anchor, length, todayISO);
-  const counterfactual = predictionStatus(previousDate, todayISO, false);
+  const { status: label, daysLate } = status(anchor, length, previousDate);
 
   return {
     available: true,
-    model: 'baseline',
+    model,
     date,
     length,
     sigma,
@@ -152,63 +152,63 @@ export function baselineModel(cycles, doc, todayISO) {
     anchor,
     weight: null,
     previousDate,
-    status: counterfactual.status === 'late' ? 'passed' : counterfactual.status,
-    daysLate: counterfactual.daysLate,
+    status: label,
+    daysLate,
     reason: null,
     fromTest: false,
   };
 }
 
+export function baselineModel(cycles, doc, todayISO) {
+  const sample = baselineCycles(cycles, doc);
+
+  // The anchor is the last pre-birth-control period start, which is the start
+  // of the cycle following the last baseline cycle. `buildCycles` always
+  // populates `nextStart`, so this is present for any cycle it produced.
+  const anchor = sample.length > 0 ? (sample[sample.length - 1].nextStart ?? null) : null;
+
+  return buildModel(sample, {
+    model: 'baseline',
+    anchor,
+    todayISO,
+    reasons: {
+      fewCycles: n => `needs at least 2 usable pre-birth-control cycles, has ${n}`,
+      tooOld: 'every cycle is too old to carry weight',
+      noAnchor: 'the last pre-birth-control cycle has no following period start',
+    },
+    // `suppressing` is always false here: nothing hypothetical can be "not
+    // expected". A counterfactual cycle can only be upcoming or already passed,
+    // so `late` is relabelled -- calling the ghost "late" would imply the owner
+    // is late when the statement is about a cycle that was never going to
+    // happen. Measured from the most recent passed projection.
+    status: (_anchor, _length, previousDate) => {
+      const counterfactual = predictionStatus(previousDate, todayISO, false);
+      return {
+        status: counterfactual.status === 'late' ? 'passed' : counterfactual.status,
+        daysLate: counterfactual.daysLate,
+      };
+    },
+  });
+}
+
 // The forward prediction's prior: every cycle no hormonal episode touched,
 // anchored on the most recent logged period. Unlike `baselineModel` it does not
 // freeze at the first episode, so natural cycles logged since keep counting.
-// Same guards as `baselineModel`, for the same reasons.
+// Same guards as `baselineModel` (they are one function), for the same reasons.
 export function naturalModel(cycles, doc, todayISO) {
-  const sample = naturalCycles(cycles, doc);
-  if (sample.length < 2) {
-    return unavailable('natural', `needs at least 2 natural cycles, has ${sample.length}`);
-  }
-
-  const weights = sample.map(cycle => cycleWeight(cycle, todayISO));
-  const lengths = sample.map(cycle => cycle.length);
-  const nEff = effectiveN(lengths, weights);
-  const length = weightedMedian(lengths, weights);
-
-  if (length === null || !(nEff > 0)) {
-    return unavailable('natural', 'every natural cycle is too old to carry weight');
-  }
-
-  const sigma = weightedSd(lengths, weights) ?? 0;
-
-  const anchor = lastPeriodStart(doc);
-  if (anchor === null) {
-    return unavailable('natural', 'no logged period start to project from');
-  }
-
-  const date = projectForward(anchor, length, todayISO);
-  if (date === null) {
-    return unavailable('natural', 'projection exceeded the step cap without reaching today');
-  }
-
-  const previousDate = projectPrevious(anchor, length, todayISO);
-  const { status, daysLate } = predictionStatus(firstProjection(anchor, length), todayISO, false);
-
-  return {
-    available: true,
+  return buildModel(naturalCycles(cycles, doc), {
     model: 'natural',
-    date,
-    length,
-    sigma,
-    confidence: confidencePercent(sigma, nEff),
-    nEff,
-    anchor,
-    weight: null,
-    previousDate,
-    status,
-    daysLate,
-    reason: null,
-    fromTest: false,
-  };
+    anchor: lastPeriodStart(doc),
+    todayISO,
+    reasons: {
+      fewCycles: n => `needs at least 2 natural cycles, has ${n}`,
+      tooOld: 'every natural cycle is too old to carry weight',
+      noAnchor: 'no logged period start to project from',
+    },
+    // Not relabelled, and measured from the due date rather than the most
+    // recent passed projection -- see firstProjection.
+    status: (anchor, length) => predictionStatus(firstProjection(anchor, length), todayISO, false),
+  });
 }
 
 // A positive ovulation test outside the predicted window moves the period date
