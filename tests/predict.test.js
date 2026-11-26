@@ -715,6 +715,23 @@ describe('naturalModel, discriminating cases', () => {
   });
 });
 
+describe('naturalModel measures lateness from the due date', () => {
+  // adaptedModel overwrites status and daysLate on every available path, so this
+  // is the only assertion on naturalModel's own. Anchor 2015-02-26, length 28:
+  // due 2015-03-26, then 04-23, then 05-21. On 2015-05-20 the period is 55 days
+  // past its FIRST due date (5 left in March + 30 in April + 20 in May). Measured
+  // from the most recent passed projection (04-23) it would read 27, sawtoothing
+  // back at each cycle boundary.
+  it('counts days late from the first projection, not the latest passed one', () => {
+    const d = { spans: [{ start: '2015-01-01' }, { start: '2015-01-29' }, { start: '2015-02-26' }] };
+    const m = naturalModel(buildCycles(d), d, '2015-05-20');
+    expect(m.anchor).toBe('2015-02-26');
+    expect(m.previousDate).toBe('2015-04-23');
+    expect(m.daysLate).toBe(55);
+    expect(m.status).toBe('late');
+  });
+});
+
 describe('adaptedModel takes naturalModel as its prior', () => {
   it('learns from natural cycles logged after a method ended', () => {
     const d = {
@@ -826,5 +843,94 @@ describe('a test outside the window moves the prediction', () => {
     expect(m.fromTest).toBe(true);
     expect(m.daysLate).toBe(6);
     expect(m.status).toBe('not-expected');
+  });
+});
+
+// baselineModel and naturalModel are thin wrappers over one shared helper, so a
+// guard in that helper must hold for BOTH. Each case below drives the same input
+// through both models and asserts each answers in its own name and its own words;
+// a change to one guard that skipped the other would redden one half of the pair.
+describe('baselineModel and naturalModel share their guards', () => {
+  const noMethods = doc({ spans: REGULAR_STARTS.map(start => span(start, null)) });
+  const MODELS = [
+    ['baseline', baselineModel, /pre-birth-control cycles, has 1$/],
+    ['natural', naturalModel, /natural cycles, has 1$/],
+  ];
+
+  it.each(MODELS)('%s: is unavailable below the two-cycle minimum, naming its own sample', (name, model, reason) => {
+    const m = model(regularCycles.slice(0, 1), noMethods, '2016-06-01');
+    expect(m.available).toBe(false);
+    expect(m.model).toBe(name);
+    expect(m.reason).toMatch(reason);
+    expect(m.date).toBeNull();
+    expect(m.fromTest).toBe(false);
+  });
+
+  it.each(MODELS)('%s: is available at exactly two cycles', (name, model) => {
+    const m = model(regularCycles.slice(0, 2), noMethods, '2016-06-01');
+    expect(m.model).toBe(name);
+    expect(m.available).toBe(true);
+  });
+
+  it.each(MODELS)('%s: is unavailable when every cycle is too old to carry weight', (name, model) => {
+    const m = model(regularCycles, noMethods, '9000-01-01');
+    expect(m.available).toBe(false);
+    expect(m.model).toBe(name);
+    expect(m.reason).toMatch(/too old to carry weight/);
+    expect(m.fromTest).toBe(false);
+  });
+
+  it.each([
+    ['baseline', baselineModel, (cycles) => [cycles, noMethods]],
+    ['natural', naturalModel, (cycles) => [cycles, doc()]],
+  ])('%s: a missing anchor is a missing prediction', (name, model, args) => {
+    const withoutNext = regularCycles.map(
+      (c, i) => (i === regularCycles.length - 1 ? (({ nextStart, ...rest }) => rest)(c) : c),
+    );
+    const [cycles, d] = args(withoutNext);
+    const m = model(cycles, d, '2016-06-01');
+    expect(m.available).toBe(false);
+    expect(m.model).toBe(name);
+    expect(m.date).toBeNull();
+    expect(m.anchor).toBeNull();
+    // The anchor guard's own reason, not the step-cap one a null anchor would
+    // fall through to if the guard were removed.
+    expect(m.reason).toMatch(/no (logged|following) period start/);
+    expect(m.fromTest).toBe(false);
+  });
+
+  // "No observed spread" (0) is distinct from "cannot be computed" (null). One
+  // cycle so old its weight underflows to zero leaves a single effectively
+  // weighted observation, for which weightedSd is null.
+  it.each(MODELS)('%s: falls back to a sigma of 0 when the weighted SD cannot be computed', (name, model) => {
+    const ancient = { ...cycle('0500-01-01', 28), nextStart: '0500-01-29' };
+    const m = model([ancient, ...regularCycles.slice(-1)], noMethods, '2016-06-01');
+    expect(m.available).toBe(true);
+    expect(m.sigma).toBe(0);
+  });
+
+  it.each(MODELS)('%s: available never comes with a null date (step cap)', (name, model) => {
+    const m = model(regularCycles, noMethods, '2200-01-01');
+    expect(m.available).toBe(false);
+    expect(m.model).toBe(name);
+    expect(m.date).toBeNull();
+    expect(m.reason).toMatch(/step cap/i);
+    expect(m.fromTest).toBe(false);
+  });
+
+  it.each(MODELS)('%s: an available result has a date, a finite sigma and fromTest false', (name, model) => {
+    const m = model(regularCycles, noMethods, '2016-06-01');
+    expect(m.available).toBe(true);
+    expect(m.model).toBe(name);
+    expect(typeof m.date).toBe('string');
+    expect(Number.isFinite(m.sigma)).toBe(true);
+    expect(m.reason).toBeNull();
+    expect(m.fromTest).toBe(false);
+  });
+
+  it('agrees between the models on length, sigma and confidence for one shared sample', () => {
+    const b = baselineModel(regularCycles, noMethods, '2016-06-01');
+    const n = naturalModel(regularCycles, noMethods, '2016-06-01');
+    expect([n.length, n.sigma, n.nEff, n.confidence]).toEqual([b.length, b.sigma, b.nEff, b.confidence]);
   });
 });
