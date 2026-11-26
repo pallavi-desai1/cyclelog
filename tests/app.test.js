@@ -522,6 +522,53 @@ describe('phases and ovulation across every month', () => {
     expect(app()).not.toMatch(/projectForward|firstProjection/);
   });
 
+  it('draws fertile marks on the partner\'s narrowest-scope copy, and none under a suppressing method', async () => {
+    // Design §12's named mitigation for his screen diverging from hers: the
+    // real round trip, scope projection to grid, through the real windowsFor.
+    const { cycleWindows, nextStartForDoc } = await import('../src/phase.js');
+    const { addDays } = await import('../src/dates.js');
+    const { projectDocument } = await import('../src/sync/scope.js');
+    const { buildSummary } = await import('../src/summary.js');
+    const { monthGrid } = await import('../src/calendar.js');
+    const text = app();
+    const start = text.indexOf('function windowsFor(');
+    const end = text.indexOf('\n}\n', start) + 2;
+    const windowsFor = new Function('nextStartForDoc', 'cycleWindows', 'addDays',
+      `${text.slice(start, end)}\nreturn windowsFor;`)(nextStartForDoc, cycleWindows, addDays);
+
+    const hers = {
+      version: 1, days: {}, gaps: [],
+      spans: ['2015-01-01', '2015-01-29', '2015-02-26', '2015-03-26', '2015-04-23', '2015-05-21',
+        '2015-06-18', '2015-07-16'].map(d => ({ start: d, source: 'test' })),
+      // Covers the descent days of the 04-23 and 05-21 cycles (05-07, 06-04).
+      // A non-hormonal method since 07-20 covers the current descent day: his
+      // marks survive only if expectedEffect 'none' travels with the episode.
+      birthControl: [
+        { method: 'implant', startedOn: '2015-05-01', endedOn: '2015-06-10', expectedEffect: 'suppress' },
+        { method: 'condoms', startedOn: '2015-07-20', endedOn: null, expectedEffect: 'none' },
+      ],
+    };
+    const his = projectDocument(hers, 'dates');
+    // The scope really did strip the method name; suppression must not need it.
+    expect(his.birthControl[0].method).toBeUndefined();
+
+    const today = '2015-08-05';
+    const fertileDates = (doc, month) => {
+      const summary = buildSummary(doc, today);
+      const grid = monthGrid(doc, { month, todayISO: today, adaptedDate: summary.adapted.date,
+        upcomingDates: [], windows: windowsFor(doc, summary, month) });
+      return grid.weeks.flat().filter(c => c.isFertile).map(c => c.date);
+    };
+
+    // Current cycle 07-16 + 28 = 08-13, descent 07-30, window 07-26 to 07-31.
+    expect(fertileDates(his, '2015-08')).toEqual(
+      ['2015-07-26', '2015-07-27', '2015-07-28', '2015-07-29', '2015-07-30', '2015-07-31']);
+    expect(fertileDates(his, '2015-08')).toEqual(fertileDates(hers, '2015-08'));
+    // May: descents 05-07 and 06-04 both fall inside the suppressing episode.
+    expect(fertileDates(his, '2015-05')).toEqual([]);
+    expect(fertileDates(his, '2015-05')).toEqual(fertileDates(hers, '2015-05'));
+  });
+
   it('actually builds windows from the doc, and returns none when she has no anchor', async () => {
     const { cycleWindows, nextStartForDoc } = await import('../src/phase.js');
     const { addDays } = await import('../src/dates.js');
