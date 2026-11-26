@@ -42,7 +42,7 @@ export function firstPositiveTest(doc, cycleStartISO, nextStartISO) {
   return first;
 }
 
-// Contract: always returns a usable {from, descent, to, fromTest}; never null,
+// Contract: always returns a usable {from, descent, to, fromTest[, testedOn]}; never null,
 // never partial. Callers (the prediction hook) rely on this.
 export function applyTestOverride(window, testISO, cycleStartISO) {
   if (testISO == null || (testISO >= window.from && testISO <= window.to)) {
@@ -56,7 +56,10 @@ export function applyTestOverride(window, testISO, cycleStartISO) {
   // flagged day is the one direction this feature may not fail in. Such a test
   // is more likely a mis-log or odd surge; it still shows in the day panel.
   if (recentred === null) return { ...window, fromTest: false };
-  return { ...recentred, fromTest: true };
+  // testedOn is the observation the window moved to. It equals the descent day
+  // today, but is carried explicitly so a reader says "moved by a test on X"
+  // without having to know that.
+  return { ...recentred, fromTest: true, testedOn: testISO };
 }
 
 // Where the next period moves to when a positive test outside the predicted

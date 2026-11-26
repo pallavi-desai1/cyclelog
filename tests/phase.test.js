@@ -92,6 +92,7 @@ describe('applyTestOverride', () => {
 
   it('leaves the window alone when the test falls inside it', () => {
     expect(applyTestOverride(w, '2015-03-13', '2015-03-01')).toEqual({ ...w, fromTest: false });
+    expect(applyTestOverride(w, '2015-03-13', '2015-03-01')).not.toHaveProperty('testedOn');
   });
 
   it('leaves the window alone on its first and last day', () => {
@@ -101,7 +102,7 @@ describe('applyTestOverride', () => {
 
   it('recentres on the test date when it falls outside', () => {
     expect(applyTestOverride(w, '2015-03-22', '2015-03-01')).toEqual({
-      from: '2015-03-18', descent: '2015-03-22', to: '2015-03-23', fromTest: true,
+      from: '2015-03-18', descent: '2015-03-22', to: '2015-03-23', fromTest: true, testedOn: '2015-03-22',
     });
   });
 
@@ -149,7 +150,7 @@ describe('cycleWindows', () => {
   it('recentres on a positive ovulation test and reports fromTest', () => {
     const tested = { ...doc, days: { '2015-03-22': { tests: { ovulation: 'positive' } } } };
     const windows = cycleWindows(tested, { nextStartFor: logged, fromISO: '2015-03-01', toISO: '2015-03-31' });
-    expect(windows[0]).toMatchObject({ descent: '2015-03-22', fromTest: true });
+    expect(windows[0]).toMatchObject({ descent: '2015-03-22', fromTest: true, testedOn: '2015-03-22' });
   });
 
   it('sorts spans before walking them', () => {

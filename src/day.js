@@ -80,6 +80,12 @@ export function dayDetail(doc, dateISO, {
     isFertile: window !== null,
     // Descent and fromTest exist only inside a window, as on the grid.
     isDescent: window !== null && window.descent === dateISO,
+    // Every day of a moved window, not just the descent day: the window as a
+    // whole was moved. `testedLabel` says by which test, so the panel can word
+    // it as a fact about the window rather than about "here".
     fromTest: window !== null && window.fromTest === true,
+    testedLabel: window !== null && window.fromTest === true && typeof window.testedOn === 'string'
+      ? dayLabel(window.testedOn)
+      : null,
   };
 }

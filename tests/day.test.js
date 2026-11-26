@@ -188,6 +188,22 @@ describe('context for the day', () => {
     expect(on('2015-03-17', { windows }).isFertile).toBe(false);
   });
 
+  it('names the test date on every day of a moved window, as fact', () => {
+    // Moved to a positive on 2015-03-05: window 03-01 to 03-06, descent 03-05.
+    const moved = [{ from: '2015-03-01', descent: '2015-03-05', to: '2015-03-06', cycleStart: '2015-03-01',
+      fromTest: true, testedOn: '2015-03-05' }];
+    for (const date of ['2015-03-01', '2015-03-03', '2015-03-05', '2015-03-06']) {
+      expect(on(date, { windows: moved })).toMatchObject({ fromTest: true, testedLabel: '5 March 2015' });
+    }
+    expect(on('2015-03-08', { windows: moved }).testedLabel).toBeNull();
+  });
+
+  it('has no test label on a window that was not moved', () => {
+    const still = [{ from: '2015-03-11', descent: '2015-03-15', to: '2015-03-16', cycleStart: '2015-03-01',
+      fromTest: false, testedOn: '2015-03-05' }];
+    expect(on('2015-03-12', { windows: still }).testedLabel).toBeNull();
+  });
+
   it('reports no test-moved window on a window that was not moved, or outside one', () => {
     const windows = [{ from: '2015-03-11', descent: '2015-03-15', to: '2015-03-16', cycleStart: '2015-03-01', fromTest: false }];
     expect(on('2015-03-12', { windows }).fromTest).toBe(false);

@@ -402,9 +402,16 @@ describe('the day panel', () => {
       .toContain('Egg expected to descend on this day');
   });
 
-  it('says when the window was moved by a positive test', () => {
-    expect(renderDay({ ...detail(), isFertile: true, fromTest: true, caveat: fertileCaveat }))
-      .toContain('Moved here by a positive ovulation test');
+  it('says, as fact, which test moved the window', () => {
+    const html = renderDay({ ...detail(), isFertile: true, fromTest: true, testedLabel: '5 March 2015', caveat: fertileCaveat });
+    expect(html).toContain('This window was moved by a positive ovulation test on 5 March 2015');
+    expect(html).not.toContain('Moved here');
+  });
+
+  it('still says the window was moved when the test date is unknown', () => {
+    const html = renderDay({ ...detail(), isFertile: true, fromTest: true, testedLabel: null, caveat: fertileCaveat });
+    expect(html).toContain('This window was moved by a positive ovulation test');
+    expect(html).not.toMatch(/ on null|undefined/);
   });
 
   it('never suggests the days around a fertile day are safe', () => {

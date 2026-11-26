@@ -225,7 +225,10 @@ export function renderDay(detail, { canEdit = true } = {}) {
   if (detail.isFertile) {
     parts.push(line('', 'Fertile window — predicted'));
     if (detail.isDescent) parts.push(line('', 'Egg expected to descend on this day'));
-    if (detail.fromTest) parts.push(line('', 'Moved here by a positive ovulation test'));
+    if (detail.fromTest) {
+      const on = detail.testedLabel ? ` on ${escapeHtml(detail.testedLabel)}` : '';
+      parts.push(line('', `This window was moved by a positive ovulation test${on}`));
+    }
     parts.push(caveatParagraph(detail.caveat));
   }
   if (detail.method !== null) {
